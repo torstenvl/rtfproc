@@ -9,4 +9,7 @@
 
 int rtf_replace(FILE *, FILE *, char *, char *);
 
+#define INDETERMINATE 1
+#define TOKENMISMATCH 2
+
 #endif
