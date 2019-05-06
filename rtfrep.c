@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
+#include <ctype.h>
 #include "rtfrep.h"
 
 // DESIGN DECISIONS
@@ -16,17 +17,21 @@
 
 
 // Macros
-#define ISERROR(x)          /* Is it non-zero? */               ((x)!=0)
-#define partialmatch(x, y)  /* Does x match 1st byte of y? */   ((x) == (y[0]))
+#define ISERROR(x) ((x)!=0)
+#define partialmatch(x, y) ((x) == (y[0]))
 
 
-// Encapsulated function prototypes - only available internal to the module
+// Encapsulated function prototypes
 int tokencheck(char *, size_t, char *, size_t, char *);
+
+
+
 
 
 int rtf_replace(FILE *in_stream, FILE *out_stream, char *key, char *replace) {
 
   // Variable declarations
+
   int    errflags = 0;      // return 0 for success, anything else for error
   int    matchlength;
   int    filestatus;
@@ -38,6 +43,7 @@ int rtf_replace(FILE *in_stream, FILE *out_stream, char *key, char *replace) {
 
 
   // Buffer size constants are in rtf_replace.h
+
   char filebuffer[FILE_BUFFER_SIZE];
   char tokenbuffer[TOKEN_BUFFER_SIZE];
 
@@ -48,10 +54,12 @@ int rtf_replace(FILE *in_stream, FILE *out_stream, char *key, char *replace) {
 
     // Try to read as much as we can into the filebuffer
     // fread(char *buffer, size_t size, size_t maxnumber, FILE *stream)
+
     readsize = fread(filebuffer, 1, FILE_BUFFER_SIZE, in_stream);
 
     // If we can't fill the buffer, we either have an error or have reached
     // the end of the file.  Log an error, if any, and process what we have.
+
     if (readsize < FILE_BUFFER_SIZE) {
       filestatus = ferror(in_stream);
       if (ISERROR(filestatus)) {
@@ -60,14 +68,10 @@ int rtf_replace(FILE *in_stream, FILE *out_stream, char *key, char *replace) {
       }
     }
 
-    // Because we're in "raw mode" (fread() instead of fgets()), we don't
-    // have built-in null termination.  This makes it absolutely imperative
-    // to know our buffer size so that we don't access beyond the end of
-    // valid data.  In this case, the valid buffer is the number of bytes
-    // we read from the file.
     buffersize = readsize;
 
     // Loop through the file buffer looking for partial matches.
+
     for (i = 0; i < buffersize; i++) {
 
       if (partialmatch(filebuffer[i], key)) {
@@ -93,7 +97,7 @@ int rtf_replace(FILE *in_stream, FILE *out_stream, char *key, char *replace) {
         // what we have, move the unprocessed part of the buffer to the
         // beginning, and fill up the now-empty part of the buffer as much as
         // we can.
-        if ((i * 2) > buffersize) { // 2i>b = i>b/2 → more than halfway thru
+        if ((i * 2) > buffersize) {
           remnantsize = buffersize - i;
           remnantmax  = FILE_BUFFER_SIZE - i;
           fwrite(filebuffer, 1, i, out_stream);
@@ -113,16 +117,16 @@ int rtf_replace(FILE *in_stream, FILE *out_stream, char *key, char *replace) {
         // See if we have a full match, and if so, get the length of the
         // matching file text.  This will have to be retooled to return
         // a character buffer, in all likelihood.
-        matchlength = tokencheck( filebuffer + i,   buffersize - i,
-                                  tokenbuffer,      TOKEN_BUFFER_SIZE,
-                                  key);
+        matchlength = tokencheck(filebuffer + i, buffersize - i,
+                tokenbuffer,    TOKEN_BUFFER_SIZE,
+                key);
 
         // If we have a match, then output the appropriate replacement token.
         // TODO:  If we have multiple tokens, we will have to find out WHICH
         // token was matched ... the lines between this iterative function
         // and the token-checking function need to be shifted.
         if (matchlength > 0) {
-          fwrite(rep, 1, strlen(rep), fp_out);
+          fwrite(replace, 1, strlen(replace), out_stream);
           memmove(filebuffer, filebuffer + i + matchlength,
             buffersize - (i + matchlength));
           buffersize = buffersize - (i + matchlength);
@@ -134,7 +138,7 @@ int rtf_replace(FILE *in_stream, FILE *out_stream, char *key, char *replace) {
     // At this point we have iterated through and handled any potential matches
     // in the file buffer, which means whatever is left in our buffer is good
     // to output.
-    fwrite(filebuffer, 1, buffersize, fp_out);
+    fwrite(filebuffer, 1, buffersize, out_stream);
 
   } // end of buffer
 
