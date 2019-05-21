@@ -38,13 +38,31 @@ int main(void) {
         fprintf(stderr, "File read error %d!\n", filestatus);
         errflags++;
       } else {
-        // Nothing.  This will be caught in the while()-loop conditional.
+        // End of the file was reached.  We might still have some good data
+        // though, so we will keep processing/writing.
+      }
+    }
+
+    for (size_t i = 0; i < readsize; i++) {
+      if (filebuffer[i] == '\\') {
+        // The next thing we have is an RTF code of some sort
+        fprintf(stderr, "Found \\\t");
+      }
+      if (filebuffer[i] == '{') {
+        // Opening a new RTF context
+        fprintf(stderr, "Found \\\t");
+      }
+      if (filebuffer[i] == '}') {
+        // Closing an RTF context
+        fprintf(stderr, "Found \\\t");
       }
     }
 
     fwrite(filebuffer, 1, readsize, out_stream);
 
   } // end of buffer-read loop
+
+  fprintf(stderr, "\n\n");
 
   return errflags;
 }
