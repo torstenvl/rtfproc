@@ -1,21 +1,29 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <ctype.h>
 
 #define ISERROR(x)        ((x) != 0)
 
 #define FILENAME          "test.rtf"
 #define FILE_BUFFER_SIZE  512
+#define ORACLE_BUFFER_SIZE 128
 
 int main(void) {
 
   // Variable declarations
   char filebuffer[FILE_BUFFER_SIZE];
+  char oraclebuffer[ORACLE_BUFFER_SIZE];
   FILE  *in_stream;
   FILE  *out_stream = stdout;
   size_t readsize;
   int filestatus = 0;
   int errflags = 0;
+
+  size_t i;
+  size_t oracle;
+  size_t stackdepth = 0;
+  size_t maxstackdepth = 0;
 
   // Open the file
   in_stream = fopen(FILENAME, "rb");
@@ -43,18 +51,34 @@ int main(void) {
       }
     }
 
-    for (size_t i = 0; i < readsize; i++) {
+    for (i = 0; i < readsize; i++) {
       if (filebuffer[i] == '\\') {
         // The next thing we have is an RTF code of some sort
-        fprintf(stderr, "Found \\\t");
+        // The oracle cursor looks into the near future.  Start just past i
+        // and read until we reach the end of the RTF code token.
+        // RTF code tokens are terminated by a backslash, whitespace, or
+        // the start or end of an RTF block (delimited by { and }).
+        // FRAGILE:  WHAT IF WE EXHAUST A BUFFER?
+        memset(oraclebuffer, 0, ORACLE_BUFFER_SIZE);
+        for (oracle=1;
+             oracle < (ORACLE_BUFFER_SIZE-1) && oracle+i < readsize;
+             oracle++) {
+          if (filebuffer[i+oracle] == '\\') break;
+          if (isspace(filebuffer[i+oracle])) break;
+          if (filebuffer[i+oracle] == '}') break;
+          if (filebuffer[i+oracle] == '{') break;
+          if (oraclebuffer[0] == '\'' && oracle > 3) break;
+          oraclebuffer[oracle-1] = filebuffer[i+oracle];
+        }
+        fprintf(stderr, "Found RTF command token: %s\n", oraclebuffer);
       }
       if (filebuffer[i] == '{') {
-        // Opening a new RTF context
-        fprintf(stderr, "Found \\\t");
+        stackdepth++;
+        if (stackdepth > maxstackdepth) maxstackdepth = stackdepth;
       }
       if (filebuffer[i] == '}') {
-        // Closing an RTF context
-        fprintf(stderr, "Found \\\t");
+        if (stackdepth == 0) fprintf(stderr, "TRYING TO DECREASE STATE STRUCT STACK DEPTH BELOW ZERO\n\n");
+        stackdepth--;
       }
     }
 
