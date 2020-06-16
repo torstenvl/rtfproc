@@ -42,3 +42,5 @@ repobj *new_repobj_from_file_to_file(const char *, const char *);
 repobj *new_repobj_from_stream_to_stream(FILE *, FILE *);
 void destroy_repobj(repobj *);
 int rtf_process(repobj *);
+
+void memzero(void *const, const size_t);
