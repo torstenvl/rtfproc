@@ -34,7 +34,7 @@ int rtf_process(repobj *r) {
 
     while (!feof(r->is)) {
 
-        memset_s(r->ob, FB_Z, 0, FB_Z);
+        memzero(r->ob, FB_Z);
         r->ibz = fread(r->ib, 1, FB_Z, r->is);
 
         // Incomplete buffer fill = error or EOF. If an error, log it.
@@ -62,7 +62,13 @@ int rtf_process(repobj *r) {
 
 
 
+void memzero(void *const p, const size_t n)
+{
+  volatile unsigned char *volatile p_ = (volatile unsigned char *volatile) p;
+  size_t i = (size_t) 0U;
 
+  while (i < n) p_[i++] = 0U;
+}
 
 
 
@@ -197,7 +203,7 @@ repobj *new_repobj_from_stream_to_stream(FILE *ifstream, FILE *ofstream) {
     r = malloc(sizeof(*r));
     if (!r) return NULL;
 
-    memset_s(r, sizeof *r, 0, sizeof *r);
+    memzero(r, sizeof *r);
     r->is = ifstream;
     r->os = ofstream;
 
@@ -212,7 +218,7 @@ void destroy_repobj(repobj *r) {
     if (r->is != stdin) fclose(r->is);
     if (r->os != stdout) fclose(r->os);
 
-    memset_s(r, sizeof *r, 0, sizeof *r);
+    memzero(r, sizeof *r);
 
     free(r);
 }
