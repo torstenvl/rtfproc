@@ -6,7 +6,7 @@
 #define PB_Z              256   // Pattern buffer size
 
 
-typedef char byte;        // A char is one byte in size, per the standard
+typedef char     byte;    // A char is one byte in size, per the standard
 typedef uint32_t uccp;    // Four bytes per Unicode codepoint
 
 
