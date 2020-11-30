@@ -34,11 +34,19 @@ int rtf_process(repobj *r) {
 
     while (!feof(r->is)) {
 
+        ////////////////////////
+        // SET UP OUR BUFFERS //
+        ////////////////////////
         memzero(r->ob, FB_Z);
         r->ibz = fread(r->ib, 1, FB_Z, r->is);
+        r->ibi = 0;
+        r->obi = 0;
 
-        // Incomplete buffer fill = error or EOF. If an error, log it.
-        // Then keep processing. (If EOF, it'll fall through on next while().)
+        /////////////////////////////////////////////////////
+        // CHECK FOR INCOMPLETE BUFFER FILL → ERROR OR EOF //
+        //   Error: log it and keep processing             //
+        //   EOF: keep processing (fallthrough on while()) //
+        /////////////////////////////////////////////////////
         if (r->ibz < FB_Z) {
             if (ISERROR(err = ferror(r->is))) {
                 fprintf(stderr, "File read error %d!\n", err);
@@ -46,13 +54,19 @@ int rtf_process(repobj *r) {
             }
         }
 
-        for (r->ibi = 0, r->obi = 0; r->ibi < r->ibz; r->ibi++) {
+        ///////////////////////////////////////////////////////////////
+        // LOOP INPUT BUFFER TO OUTPUT BUFFER, PROCESSING ON THE WAY //
+        ///////////////////////////////////////////////////////////////
+        while (r->ibi < r->ibz) {
             // if (r->ib[r->ibi] == '\\') { }
             // if (r->ib[r->ibi] == '{') { }
             // if (r->ib[r->ibi] == '}') { }
-            r->ob[r->obi++] = r->ib[r->ibi];
+            r->ob[r->obi++] = r->ib[r->ibi++];
         }
 
+        /////////////////////////////
+        // FLUSH THE OUTPUT BUFFER //
+        /////////////////////////////
         fwrite(r->ob, 1, r->obi, r->os);
 
     } // end of buffer-read loop
