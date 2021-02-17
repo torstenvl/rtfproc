@@ -6,21 +6,28 @@
 
 // REMINDER OF STRUCTURE DECLARATIONS AND CONSTANTS
 // typedef struct repobj {
-//     FILE *is;             // Input stream
-//     FILE *os;             // Output stream
-//     byte ib[FB_Z];        // Input file buffer
-//     byte ibto[FB_Z];      // Input file buffer token oracle (readahead)
-//     byte ob[FB_Z];        // Output file buffer
-//     uccp pb[PB_Z];        // Pattern buffer for comparing codepoints
-//     size_t ibi;           // Input buffer iterator
-//     size_t ibtoi;         // Input buffer token oracle iterator
-//     size_t obi;           // Output buffer iterator
-//     size_t pbi;           // Pattern buffer iterator
+//     FILE*  is;            // Input stream
+//
+//     byte   ib[FB_Z];      // Input file buffer
 //     size_t ibz;           // Input buffer actual size
+//     size_t ibi;           // Input buffer iterator
+//
+//     FILE*  os;            // Output stream
+//
+//     byte   ob[FB_Z];      // Output file buffer
 //     size_t obz;           // Output buffer actual size
+//     size_t obi;           // Output buffer iterator
+//
+//     byte   ibto[FB_Z];    // Input file buffer token oracle (readahead)
+//     size_t ibtoi;         // Input buffer token oracle iterator
+//
+//     uccp   pb[PB_Z];      // Pattern buffer for comparing codepoints
 //     size_t pbz;           // Pattern buffer actual size
+//     size_t pbi;           // Pattern buffer iterator
+//
 //     size_t pbmaps[PB_Z];  // Maps to start of rtf sequence for pb[i] in ib[]
 //     size_t pbmape[PB_Z];  // Maps to end of rtf sequence for pb[i] in ib[]
+//
 // } repobj;
 // FB_Z file buffer (ib and ob) size
 // PB_Z pattern buffer size
@@ -44,13 +51,15 @@ int rtf_process(repobj *r) {
 
         /////////////////////////////////////////////////////
         // CHECK FOR INCOMPLETE BUFFER FILL → ERROR OR EOF //
-        //   Error: log it and keep processing             //
-        //   EOF: keep processing (fallthrough on while()) //
         /////////////////////////////////////////////////////
         if (r->ibz < FB_Z) {
             if (ISERROR(err = ferror(r->is))) {
                 fprintf(stderr, "File read error %d!\n", err);
                 nerrs++;
+            } else {
+                // Incomplete buffer fill and no error
+                // → must be end of file. Let it fall through
+                // on the while() loop and end gracefully.
             }
         }
 
