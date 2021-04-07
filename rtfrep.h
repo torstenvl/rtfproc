@@ -1,46 +1,44 @@
-// We use a return of 0 as an indication of success throughout
-// the RTFRep sybsystem.  This is a shorthand for checking errors.
-#define ISERROR(x)        ((x) != 0)
+#ifndef RTFPROC_H
+#define RTFPROC_H
 
-#define FB_Z              2048  // File buffer size
-#define PB_Z              256   // Pattern buffer size
+#include <stdio.h>
+#include <stdint.h>
+
+// Longest RTF command is 25 bytes plus argument. 64 bytes should be plenty.
+// The longest text we will support replacing is 512 code points long for now.
+// Allow any of those code points to be in the form \uNNNNNN\'xx\'xx (16bytes)
+// or have some amount of character formatting in it.
+#define RAW_BUFFER_SIZE 8192
+#define TXT_BUFFER_SIZE 1024
+#define CMD_BUFFER_SIZE 256
+
+typedef enum rtf_read_state_t {txt, cmd, cmdproc, ignore, flush} rtf_read_state_t;
+typedef enum rtf_match_state_t {match, nomatch, indeterminate} rtf_match_state_t;
+typedef char byte;
+
+typedef struct rtfobj {
+    FILE *ipstrm;
+    FILE *opstrm;
+
+    int c;
+
+    rtf_read_state_t rdstt;
+    rtf_match_state_t mtchstt;
+    byte rawbfr[RAW_BUFFER_SIZE];
+    byte txtbfr[TXT_BUFFER_SIZE];
+    byte cmdbfr[CMD_BUFFER_SIZE];
+    size_t ri;
+    size_t ti;
+    size_t ci;
+
+    char **dict;
+    size_t di;
+} rtfobj;
 
 
-typedef char     byte;    // A char is one byte in size, per the standard
-typedef uint32_t uccp;    // Four bytes per Unicode codepoint
 
 
-typedef struct repobj {
+rtfobj *new_rtfobj_stream_stream_dict(FILE *, FILE *, char **);
+int rtf_replace(rtfobj *);
 
-    FILE *is;               // Input stream
-    FILE *os;               // Output stream
-
-    byte ib[FB_Z];          // Input file buffer
-    byte ibto[FB_Z];        // Input file buffer token oracle (readahead)
-    byte ob[FB_Z];          // Output file buffer
-    uccp pb[PB_Z];          // Pattern buffer for comparing codepoints
-
-    size_t ibi;             // Input buffer iterator
-    size_t ibtoi;           // Input buffer token oracle iterator
-    size_t obi;             // Output buffer iterator
-    size_t pbi;             // Pattern buffer iterator
-
-    size_t ibz;             // Input buffer actual size
-    size_t obz;             // Output buffer actual size
-    size_t pbz;             // Pattern buffer actual size
-
-    size_t pbmaps[PB_Z];    // Maps to start of rtf sequence for pb[i] in ib[]
-    size_t pbmape[PB_Z];    // Maps to end of rtf sequence for pb[i] in ib[]
-
-} repobj;
-
-
-repobj *new_repobj(void);
-repobj *new_repobj_from_file(const char *);
-repobj *new_repobj_to_file(const char *);
-repobj *new_repobj_from_file_to_file(const char *, const char *);
-repobj *new_repobj_from_stream_to_stream(FILE *, FILE *);
-void destroy_repobj(repobj *);
-int rtf_process(repobj *);
-
-void memzero(void *const, const size_t);
+#endif
