@@ -38,6 +38,7 @@ char *buildstamp(void) {
         bs[bi++] = time[7];
         bs[bi++] = '\0';
     }
+    
     return bs;
 }
 
