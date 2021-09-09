@@ -1,8 +1,8 @@
-EXE = rtfrep
+EXE = rtfsed
 
-HDR = buildstamp.h memzero.h rtfi18n.h rtfrep.h re.h
+HDR = rtftypes.h rtfsed.h re.h
 
-SRC = main.c rtfrep.c re.c
+SRC = main.c rtfsed.c re.c
 
 
 
@@ -53,4 +53,4 @@ superstrict-debug: $(SRC) $(HDR)
 
 
 clean:
-	rm -Rf core *.o *~ $(EXE) $(EXE).dSYM/
+	rm -Rf core *.o *~ _log.txt _new.rtf rtfsed-debug.txt $(EXE) $(EXE).dSYM/
