@@ -2,7 +2,7 @@
 #define __RTFTYPES_H
 
 #include <stdbool.h>
-
+#include "cptou.h"
 
 #define   RAW_BUFFER_SIZE   65536  // Raw processing buffer
 #define   TXT_BUFFER_SIZE    2048  // Text processing buffer
