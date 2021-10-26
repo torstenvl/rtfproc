@@ -13,6 +13,10 @@
 //     Unicode (mostly-ish compatible with code page Windows-1252).
 //     These are encoded as UTF-8 internally for comparison/text output.
 //
+//   - When adding codepage support, I realized that we will also need to 
+//     support \fcharsetN and \cchsN, which means we will need to do at least
+//     some minimal parsing and storage of the font table. 
+//
 //   - When working with Unicode code points, this library assumes that 
 //     the source text is normalized equivalently to the replacement table.
 //     For software that uses the document itself to prompt the user for
@@ -23,7 +27,10 @@
 //   - This library is not aware of an exhaustive list of commands that take
 //     arguments that should be treated as raw data and not text data.  This
 //     means it's possible that we could end up performing a replacement in 
-//     the middle of, e.g., an embedded audio clip or something.  
+//     the middle of, e.g., an embedded audio clip or something.  Future
+//     versions will incrementally add support for ignoring data, based on
+//     working my way through the RTF spec and/or coming across documents
+//     that don't work right.
 // ---------------------------------------------------------------------------- 
 
 
@@ -233,6 +240,7 @@ void dispatch_scope(int c, rtfobj *R) {
 \----------------------------------------------------------------*/
 void dispatch_command(int c, rtfobj *R) {
     read_command(c, R);
+    DBUG("Got command: %s\n", R->cmd);
     proc_command(R);
 }
 
@@ -361,13 +369,36 @@ void read_command(int c, rtfobj *R) {
             add_to_cmd(c, R);
             add_to_raw(c, R);
             break;
+        case '\r':
+            // "The code \<ASCII10> (line feed) or \<ASCIIl3> (carriage
+            // return) is treated as the control word \par. You must include
+            // the backslashes or RTF will ignore the control word."
+            add_to_cmd('p', R);
+            add_to_cmd('a', R);
+            add_to_cmd('r', R);
+            add_to_raw('\r', R);
+            break;
+        case '\n':
+            // "The code \<ASCII10> (line feed) or \<ASCIIl3> (carriage
+            // return) is treated as the control word \par. You must include
+            // the backslashes or RTF will ignore the control word."
+            add_to_cmd('p', R);
+            add_to_cmd('a', R);
+            add_to_cmd('r', R);
+            add_to_raw('\n', R);
+            break;
         case '\'':
             add_to_cmd(c, R);
             add_to_raw(c, R);
             assert((c = fgetc(R->fin)) != EOF);
-            // Fall through and get the next complete alphanumeric string
-            // (which should be a two-character hex string encoding a non-
-            // ASCII code point). 
+            assert(isalnum(c));
+            add_to_cmd(c, R);
+            add_to_raw(c, R);
+            assert((c = fgetc(R->fin)) != EOF);
+            assert(isalnum(c));
+            add_to_cmd(c, R);
+            add_to_raw(c, R);
+            break;
         default:
             assert(isalnum(c));
             add_to_cmd(c, R);
