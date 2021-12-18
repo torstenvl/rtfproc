@@ -28,7 +28,7 @@
 ||  extra parameter allows multiple-return when cpt maps to two Unicode      ||
 ||  code points, and allows for carrying over information from one use of    ||
 ||  the function to the next when necessary (e.g., for double-byte           ||
-||  sequences.                                                               ||
+||  sequences).                                                              ||
 ||                                                                           ||
 ||  RETURN VALUE:                                                            ||
 ||                                                                           ||

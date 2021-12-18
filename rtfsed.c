@@ -1,3 +1,22 @@
+/*===========================================================================*\
+||                                                                           ||
+||  CALL STRUCTURE                                                           ||
+||                                                                           ||
+||  rtfreplace()                                                             ||
+||      getc()                                                               ||
+||      dispatch_scope()                                                     ||
+||      dispatch_command()                                                   ||
+||          read_command()                                                   ||
+||              add_to_cmd()                                                 ||
+||              add_to_raw()                                                 ||
+||          proc_command()                                                   ||
+||      dispatch_text()                                                      ||
+||          add_to_txt()                                                     ||
+||          add_to_raw()                                                     ||
+||                                                                           ||
+\*===========================================================================*/
+
+
 // ---------------------------------------------------------------------------- 
 // LIMITATIONS
 //
@@ -179,6 +198,7 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **dict) {
 void rtfreplace(rtfobj *R) {
     int c;
 
+    // Loop until we reach the end of the input file
     while ((c = fgetc(R->fin)) != EOF) {
         switch (c) {
             case '{':           dispatch_scope(c, R);      break;
@@ -193,8 +213,7 @@ void rtfreplace(rtfobj *R) {
         }
     }
 
-    // We hit EOF, output remaining raw buffer.  Since it didn't match so far,
-    // and we have no more input, it will never match. 
+    // Output remaining unmatched raw buffer, if any
     output_raw(R);
 }
 
@@ -233,11 +252,11 @@ void dispatch_scope(int c, rtfobj *R) {
 }
 
 
-/*----------------------------------------------------------------\
-|                                                                 |
-|   Deal RTF commands. Complicated - will use helper functions.   |
-|                                                                 |
-\----------------------------------------------------------------*/
+/*---------------------------------------------------------------------\
+|                                                                      |
+|   Deal with RTF commands. Complicated - will use helper functions.   |
+|                                                                      |
+\---------------------------------------------------------------------*/
 void dispatch_command(int c, rtfobj *R) {
     read_command(c, R);
     DBUG("Got command: %s\n", R->cmd);
@@ -532,9 +551,9 @@ void add_to_txt(int c, rtfobj *R) {
     if (R->ftxt) fputc(c, R->ftxt); 
     if (R->ftxt) fflush(R->ftxt);
 
-    if (R->ti > R->txtz - 2) {
+    if (!(R->ti < R->txtz - 1)) {
         DBUG("We have exhausted the txt buffer.\n");
-        DBUG("R->ti = %lu\n", R->ti);
+        DBUG("R->ti = %zu\n", R->ti);
         DBUG("Last txt data:\n");
         DBUG("%s\n", &R->txt[R->ti - 80]);
         DIE("Assertion failed: (R->ti < R->txtz - 1)");
@@ -544,9 +563,9 @@ void add_to_txt(int c, rtfobj *R) {
 
 
 void add_to_cmd(int c, rtfobj *R) {
-    if (R->ci > R->cmdz - 2) {
+    if (!(R->ci < R->cmdz - 1)) {
         DBUG("We have exhausted the cmd buffer.\n");
-        DBUG("R->ci = %lu\n", R->ci);
+        DBUG("R->ci = %zu\n", R->ci);
         DBUG("Last cmd data:\n");
         DBUG("%s\n", &R->cmd[R->ci - 80]);
         DIE("Assertion failed: (R->ci < R->cmdz - 1)");
@@ -556,9 +575,9 @@ void add_to_cmd(int c, rtfobj *R) {
 
 
 void add_to_raw(int c, rtfobj *R) {
-    if (R->ri > R->rawz - 2) {
+    if (!(R->ri < R->rawz - 1)) {
         DBUG("We have exhausted the raw buffer.\n");
-        DBUG("R->ri = %lu\n", R->ri);
+        DBUG("R->ri = %zu\n", R->ri);
         DBUG("Last raw data:\n");
         DBUG("%s\n", &R->raw[R->ri - 80]);
         DIE("Assertion failed: (R->ri < R->rawz - 1)");
@@ -669,7 +688,7 @@ void push_attr(rtfobj *R) {
     if (R->attr == NULL) {
         newattr->uc = 0;
         newattr->skipbytes = 0;
-        newattr->cp = CP_1252;
+        newattr->cpg = CPG_1252;
         newattr->skippable = false;
         newattr->outer = NULL;
         R->attr = newattr;

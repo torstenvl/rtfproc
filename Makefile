@@ -1,6 +1,6 @@
 EXE = rtfsed
 
-HDR = rtftypes.h rtfsed.h re.h
+HDR = rtftypes.h rtfsed.h re.h cpgtou.h
 
 SRC = main.c rtfsed.c re.c
 
