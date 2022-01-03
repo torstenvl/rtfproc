@@ -10,6 +10,7 @@
 ||              add_to_cmd()                                                 ||
 ||              add_to_raw()                                                 ||
 ||          proc_command()                                                   ||
+||              various actions                                              ||
 ||      dispatch_text()                                                      ||
 ||          add_to_txt()                                                     ||
 ||          add_to_raw()                                                     ||
@@ -22,10 +23,18 @@
 //
 //   - We use a static buffer size for the raw RTF code, the resulting text,
 //     and any RTF commands we come across.  In theory, we could end up with
-//     a buffer overflow.  We check this, but it's brittle. 
+//     a buffer overflow.  We check this, but it's brittle.  Options:
+//     - Dynamic buffers and die on memory allocation failure?
+//     - No single command should exceed the buffers (longest RTF command is
+//       something like 36 bytes) so really we're talking about text pattern
+//       matching.  If a replacement token exceeds the buffer length, emit
+//       a dignostic error message on stderr and clear buffer state as if no
+//       match?  This seems most resilient, won't crash, and at worst will
+//       just fail to work with overly long replacement tokens.  I think this
+//       is the best way to go. 
 //
 //   - Later we will wrap getting an input character to buffer it with a
-//     larger read buffer and improve performance.
+//     larger read buffer and potentially improve performance.
 //
 //   - This library does not adjust for the actual code page set in the RTF
 //     document, but instead assumes that all specified codes via \'xx are
