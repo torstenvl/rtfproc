@@ -1,97 +1,99 @@
-/*===========================================================================*\
-||                                                                           ||
-||  CPGTOU - Code Page to Unicode                                            ||
-||  Copyright (c) 2021, Joshua Lee Ockert                                    ||
-||                                                                           ||
-||  THIS WORK IS PROVIDED "AS IS," WITH NO EXPRESS OR IMPLIED WARRANTIES.    ||
-||  THERE IS NO WARRANTY OF MERCHANTABILITY, FITNESS, NON-INFRINGEMENT, OR   ||
-||  TITLE. NO AUTHOR SHALL BE LIABLE FOR ANY DAMAGES RELATING TO THIS WORK.  ||
-||                                                                           ||
-||  Permission to use, copy, modify, and/or distribute this work for any     ||
-||  purpose is hereby granted, provided this notice appears in all copies.   ||
-||                                                                           ||
+/*---------------------------------------------------------------------------*\
+|                                                                             |
+|  CPGTOU –– Code Page to Unicode                                             |
+|                                                                             |
+|  BITSC (Modified ISC) License Notice                                        |
+|  Copyright (c) 2022 Joshua Lee Ockert <torstenvl@gmail.com>                 |
+|                                                                             |
+|  THIS WORK IS PROVIDED "AS IS" WITH NO EXPRESS OR IMPLIED WARRANTIES. THERE |
+|  IS EXPRESSLY NO WARRANTY OF MERCHANTABILITY, FITNESS, NON-INFRINGEMENT, OR |
+|  TITLE. NO AUTHOR SHALL BE LIABLE, UNDER ANY THEORY OF LAW, FOR ANY DAMAGES |
+|  OF ANY CHARACTER WHATSOEVER RELATING TO THE USE OF THIS WORK.              |
+|                                                                             |
+|  Permission to use, copy, modify, and/or distribute this work for any       |
+|  purpose is hereby granted, provided this notice appears in all copies.     |
+|                                                                             |
+\*---------------------------------------------------------------------------*/
+
+
+/*---------------------------------------------------------------------------*\
+|                                                                             |
+|                       CPGTOU –– Code Page to Unicode                        |
+|                                                                             |
+|        int32_t cpgtou(unsigned char cpt, cpg_t cpg, int32_t *extra)         |
+|                                                                             |
+|   USAGE:                                                                    |
+|                                                                             |
+|   The function returns the Unicode code point corresponding most closely    |
+|   to the code point cpt in code page cpg.  However, not all code page       |
+|   code points correspond to Unicode code points on a 1:1 basis.  The        |
+|   extra parameter allows multiple-return when cpt maps to two Unicode       |
+|   code points, and allows for carrying over information from one use of     |
+|   the function to the next when necessary (e.g., for double-byte            |
+|   sequences).                                                               |
+|                                                                             |
+|   RETURN VALUE:                                                             |
+|                                                                             |
+|     - On successful conversion, the function returns the Unicode code       |
+|       point that corresponds (as close as possible) to the specified        |
+|       code point in the specified code page.  If two Unicode code points    |
+|       are required to encode the result, the second Unicode code point      |
+|       will be in the variable pointed-to by the extra parameter.            |
+|                                                                             |
+|     - If the specified code point does not exist in the given code page,    |
+|       the function returns cpNONE (defined as -1).                          |
+|                                                                             |
+|     - If the specified code page is not yet supported, the function         |
+|       will return cpUNSUPPORTED (defined as -2).                            |
+|                                                                             |
+|     - If the specified code point is the first half of a double-byte        |
+|       sequence in the given code page (e.g., in JIS-based code pages),      |
+|       then the function will return cpCALLAGAIN (defined as -3) with the    |
+|       first code point stored in the variable pointed-to by the extra       |
+|       parameter.  This allows sequential processing of first and second     |
+|       bytes without convoluted special-case processing.                     |
+|                                                                             |
+|     - If the specified code point is the second half of a double-byte       |
+|       sequence in the given code page (e.g., in JIS-based code pages),      |
+|       then the function will look to the extra parameter for the first      |
+|       half, and look up the appropriate Unicode code point for that         |
+|       double-byte sequence.  If necessary, the variable pointed-to by       |
+|       the extra parameter will be filled with a second Unicode code         |
+|       point, just as when converting a single code point to Unicode.        |
+|                                                                             |
+|       The function applies the following rules:                             |
+|                                                                             |
+|       -- If the code page allows for double-byte sequences and the extra    |
+|          parameter DOES NOT point to a valid first-byte value, then cpt     |
+|          will be treated normally (i.e., as a single-byte character or      |
+|          the first half of a double-byte character).  If cpt is not a       |
+|          valid single-byte or first-byte value, then cpNONE (defined as     |
+|          -1) will be returned.                                              | 
+|                                                                             |
+|       -- If the code page allows for double-byte sequences and the extra    |
+|          parameter DOES point to a valid first-byte value, the function     |
+|          will treat cpt as a second-byte value.  However, if cpt is not     |
+|          a valid second-byte value, then the extra parameter will be        |
+|          discarded and cpt will be treated normally (i.e., as a single-     |
+|          byte character or the first half of a double-byte character).      |
+|          If cpt is not a valid single-byte or first-byte value, then        |
+|          cpSQNCERROR (defined as -4) will be returned.                      |  
+|                                                                             |
 \*===========================================================================*/
 
 
-
-/*===========================================================================*\
-||                                                                           ||
-||                      CPGTOU –– Code Page to Unicode                       ||
-||                                                                           ||
-||       int32_t cpgtou(unsigned char cpt, cpg_t cpg, int32_t *extra)        ||
-||                                                                           ||
-||  USAGE:                                                                   ||
-||                                                                           ||
-||  The function returns the Unicode code point corresponding most closely   ||
-||  to the code point cpt in code page cpg.  However, not all code page      ||
-||  code points correspond to Unicode code points on a 1:1 basis.  The       ||
-||  extra parameter allows multiple-return when cpt maps to two Unicode      ||
-||  code points, and allows for carrying over information from one use of    ||
-||  the function to the next when necessary (e.g., for double-byte           ||
-||  sequences).                                                              ||
-||                                                                           ||
-||  RETURN VALUE:                                                            ||
-||                                                                           ||
-||    - On successful conversion, the function returns the Unicode code      ||
-||      point that corresponds (as close as possible) to the specified       ||
-||      code point in the specified code page.  If two Unicode code points   ||
-||      are required to encode the result, the second Unicode code point     ||
-||      will be in the variable pointed-to by the extra parameter.           ||
-||                                                                           ||
-||    - If the specified code point does not exist in the given code page,   ||
-||      the function returns cpNONE (defined as -1).                         ||
-||                                                                           ||
-||    - If the specified code page is not yet supported, the function        ||
-||      will return cpUNSUPPORTED (defined as -2).                           ||
-||                                                                           ||
-||    - If the specified code point is the first half of a double-byte       ||
-||      sequence in the given code page (e.g., in JIS-based code pages),     ||
-||      then the function will return cpCALLAGAIN (defined as -3) with the   ||
-||      first code point stored in the variable pointed-to by the extra      ||
-||      parameter.  This allows sequential processing of first- and          ||
-||                                                                           ||
-||                                                                           ||
-||    - If the specified code point is the second half of a double-byte      ||
-||      sequence in the given code page (e.g., in JIS-based code pages),     ||
-||      then the function will look to the extra parameter for the first     ||
-||      half, and look up the appropriate Unicode code point for that        ||
-||      double-byte sequence.  If necessary, the variable pointed-to by      ||
-||      the extra parameter will be filled with a second Unicode code        ||
-||      point, just as when converting a single code point to Unicode.       ||
-||                                                                           ||
-||      The function applies the following rules:                            ||
-||                                                                           ||
-||      -- If the code page allows for double-byte sequences and the extra   ||
-||         parameter DOES NOT point to a valid first-byte value, then cpt    ||
-||         will be treated normally (i.e., as a single-byte character or     ||
-||         the first half of a double-byte character).  If cpt is not a      ||
-||         valid single-byte or first-byte value, then cpNONE (defined as    ||
-||         -1) will be returned.                                             || 
-||                                                                           ||
-||      -- If the code page allows for double-byte sequences and the extra   ||
-||         parameter DOES point to a valid first-byte value, the function    ||
-||         will treat cpt as a second-byte value.  However, if cpt is not    ||
-||         a valid second-byte value, then the extra parameter will be       ||
-||         discarded and cpt will be treated normally (i.e., as a single-    ||
-||         byte character or the first half of a double-byte character).     ||
-||         If cpt is not a valid single-byte or first-byte value, then       ||
-||         cpSQNCERROR (defined as -4) will be returned.                     ||  
-||                                                                           ||
-\*===========================================================================*/
-
-
-
-#ifndef __CPGTOU_H
-#define __CPGTOU_H
-
+#ifndef CPGTOU_H__
+#define CPGTOU_H__
 
 
 #include <inttypes.h>
+
 
 #define cpNONE          -1
 #define cpUNSUPPORTED   -2
 #define cpCALLAGAIN     -3
 #define cpSQNCERROR     -4
+
 
 typedef enum cpg_t {
     CPG_437,      // United States IBM
@@ -123,7 +125,7 @@ typedef enum cpg_t {
     CPG_1256,     // Arabic
     CPG_1257,     // Baltic
     CPG_1258,     // Vietnamese
-    CPG_1361,     // →→→→→ Johab
+    CPG_1361,     // →→→→→ Korean (Johab)
     CPG_10000,    // Mac Roman
     CPG_10001,    // →→→→→ Mac Japan
     CPG_10004,    // Mac Arabic
@@ -148,7 +150,6 @@ typedef enum cpg_t {
     PCA,          // → Same as CPG_850 IBM multilingual
     MACROMAN      // → Same as CPG_10000 Mac Roman
 } cpg_t;
-
 
 
 /*–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––\
@@ -179,18 +180,19 @@ typedef enum cpg_t {
 \–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––*/
 
 
+__attribute__((unused)) static int32_t cpgtou(unsigned char cpt, cpg_t cpg, int32_t *extra) {
+    __attribute__((unused)) static const char license[]="\
+CPGTOU -- Code Page to Unicode                                              \n\
+Copyright (c) 2022 Joshua Lee Ockert                                        \n\
+                                                                            \n\
+THIS WORK IS PROVIDED \"AS IS\" WITH NO EXPRESS OR IMPLIED WARRANTIES. THERE\n\
+IS EXPRESSLY NO WARRANTY OF MERCHANTABILITY, FITNESS, NON-INFRINGEMENT, OR  \n\
+TITLE. NO AUTHOR SHALL BE LIABLE, UNDER ANY THEORY OF LAW, FOR ANY DAMAGES  \n\
+OF ANY CHARACTER WHATSOEVER RELATING TO THE USE OF THIS WORK.               \n\
+                                                                            \n\
+Permission to use, copy, modify, and/or distribute this work for any        \n\
+purpose is hereby granted, provided this notice appears in all copies.     \n";
 
-static int32_t cpgtou(unsigned char cpt, cpg_t cpg, int32_t *extra) {
-    static const char license[]="\
-CPGTOU - Code Page to Unicode                                             \n\
-Copyright (c) 2021, Joshua Lee Ockert                                     \n\
-                                                                          \n\
-THIS WORK IS PROVIDED \"AS IS,\" WITH NO EXPRESS OR IMPLIED WARRANTIES.   \n\
-THERE IS NO WARRANTY OF MERCHANTABILITY, FITNESS, NON-INFRINGEMENT, OR    \n\
-TITLE. NO AUTHOR SHALL BE LIABLE FOR ANY DAMAGES RELATING TO THIS WORK.   \n\
-                                                                          \n\
-Permission to use, copy, modify, and/or distribute this work for any      \n\
-purpose is hereby granted, provided this notice appears in all copies.    \n";
     static const int32_t CPG_437_TBL[128] = {
         0x00C7,  0x00FC,  0x00E9,  0x00E2,  0x00E4,  0x00E0,  0x00E5,  0x00E7,
         0x00EA,  0x00EB,  0x00E8,  0x00EF,  0x00EE,  0x00EC,  0x00C4,  0x00C5,
@@ -712,7 +714,6 @@ purpose is hereby granted, provided this notice appears in all copies.    \n";
         0x00AF,  0x02D8,  0x02D9,  0x02DA,  0x00B8,  0x02DD,  0x02DB,  0x02C7 
     };
 
-    cpt = cpt;
     unsigned char c = cpt;
     int32_t r = 0;
 
@@ -747,8 +748,8 @@ purpose is hereby granted, provided this notice appears in all copies.    \n";
         case CPG_1254:   r = (c<128) ? c : CPG_1254_TBL[c-128];    break;
         case CPG_1255:   r = (c<128) ? c : CPG_1255_TBL[c-128];    break;
         case CPG_1256:   r = (c<128) ? c : CPG_1256_TBL[c-128];    break;
-        case CPG_1257:   r = (c<128) ? c : CPG_1256_TBL[c-128];    break;
-        case CPG_1258:   r = (c<128) ? c : CPG_1256_TBL[c-128];    break;
+        case CPG_1257:   r = (c<128) ? c : CPG_1257_TBL[c-128];    break;
+        case CPG_1258:   r = (c<128) ? c : CPG_1258_TBL[c-128];    break;
         case CPG_1361:   r = cpUNSUPPORTED;                        break;
         case MAC:        r = (c<128) ? c : CPG_10000_TBL[c-128];   break;
         case MACROMAN:   r = (c<128) ? c : CPG_10000_TBL[c-128];   break;
@@ -770,7 +771,6 @@ purpose is hereby granted, provided this notice appears in all copies.    \n";
         case CPG_57009:  r = cpUNSUPPORTED;                        break;
         case CPG_57010:  r = cpUNSUPPORTED;                        break;
         case CPG_57011:  r = cpUNSUPPORTED;                        break;
-        default:         r = cpUNSUPPORTED;                        break;
     }
 
     // Support the Mac Hebrew lamed-holam ligature
