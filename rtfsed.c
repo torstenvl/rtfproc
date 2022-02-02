@@ -1,67 +1,22 @@
-/*===========================================================================*\
-||                                                                           ||
-||  CALL STRUCTURE                                                           ||
-||                                                                           ||
-||  rtfreplace()                                                             ||
-||      getc()                                                               ||
-||      dispatch_scope()                                                     ||
-||      dispatch_command()                                                   ||
-||          read_command()                                                   ||
-||              add_to_cmd()                                                 ||
-||              add_to_raw()                                                 ||
-||          proc_command()                                                   ||
-||              various actions                                              ||
-||      dispatch_text()                                                      ||
-||          add_to_txt()                                                     ||
-||          add_to_raw()                                                     ||
-||                                                                           ||
-\*===========================================================================*/
-
-
 // ---------------------------------------------------------------------------- 
 // LIMITATIONS
 //
-//   - We use a static buffer size for the raw RTF code, the resulting text,
-//     and any RTF commands we come across.  In theory, we could end up with
-//     a buffer overflow.  We check this, but it's brittle.  Options:
-//     - Dynamic buffers and die on memory allocation failure?
-//     - No single command should exceed the buffers (longest RTF command is
-//       something like 36 bytes) so really we're talking about text pattern
-//       matching.  If a replacement token exceeds the buffer length, emit
-//       a dignostic error message on stderr and clear buffer state as if no
-//       match?  This seems most resilient, won't crash, and at worst will
-//       just fail to work with overly long replacement tokens.  I think this
-//       is the best way to go. 
+//   - We use a fixed buffer sizes for raw RTF code, text, and RTF control
+//     words. Right now this is brittle.  TODO: If we reach end of buffer
+//     then emit message, output raw RTF code, and reset buffers.  This 
+//     prevents memory errors and corruption and, at worst, will just fail
+//     to work with overly long tokens. 
 //
-//   - Later we will wrap getting an input character to buffer it with a
-//     larger read buffer and potentially improve performance.
+// TODO
+//   - Add attributes for \ansicpgN, font tables with \fcharsetN and/or
+//     \cpgN, and \cchsN. Interpret \'xx according to current character set
+//     or code page. 
 //
-//   - This library does not adjust for the actual code page set in the RTF
-//     document, but instead assumes that all specified codes via \'xx are
-//     Unicode (mostly-ish compatible with code page Windows-1252).
-//     These are encoded as UTF-8 internally for comparison/text output.
-//
-//   - When adding codepage support, I realized that we will also need to 
-//     support \fcharsetN and \cchsN, which means we will need to do at least
-//     some minimal parsing and storage of the font table. 
-//
-//   - When working with Unicode code points, this library assumes that 
-//     the source text is normalized equivalently to the replacement table.
-//     For software that uses the document itself to prompt the user for
-//     replacements, this should not be an issue; however, it may cause
-//     issues in other software using this library.  Future versions will
-//     normalize to NFC before comparison. 
-//
-//   - This library is not aware of an exhaustive list of commands that take
-//     arguments that should be treated as raw data and not text data.  This
-//     means it's possible that we could end up performing a replacement in 
-//     the middle of, e.g., an embedded audio clip or something.  Future
-//     versions will incrementally add support for ignoring data, based on
-//     working my way through the RTF spec and/or coming across documents
-//     that don't work right.
+//   - Normalize replacement tokens as well as any Unicode in the text before
+//     comparison.  Use NFC normalization.
+//   
+//   - Add additional areas where we skip blocks for large data types. 
 // ---------------------------------------------------------------------------- 
-
-
 
 
 
@@ -77,121 +32,126 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
 #include <assert.h>
 #include "rtfsed.h"
-#include "re.h"
+#include "STATIC/re.h"
 
-#define DIE(s) (die(s, __func__, __LINE__))
+// Internal function declarations
+static void dispatch_scope(int c, rtfobj *R);
+static void dispatch_text(int c, rtfobj *R);
+static void dispatch_command(int c, rtfobj *R);
+static void read_command(int c, rtfobj *R);
+static void proc_command(rtfobj *R);
+static void push_attr(rtfobj *R);
+static void pop_attr(rtfobj *R);
+static int  pattern_match(rtfobj *R);
+static void output_match(rtfobj *R);
+static void output_raw(rtfobj *R);
+static void add_to_txt(int c, rtfobj *R);
+static void add_to_cmd(int c, rtfobj *R);
+static void add_to_raw(int c, rtfobj *R);
+static void reset_buffers(rtfobj *R);
+static void reset_raw_buffer(rtfobj *R);
+static void reset_txt_buffer(rtfobj *R);
+static void reset_cmd_buffer(rtfobj *R);
+static void skip_thru_block(rtfobj *R);
+static void encode_utf8(int32_t c, char *buf);
+static void memzero(void *const p, const size_t n);
 
-void dispatch_scope(int c, rtfobj *R);
-void dispatch_text(int c, rtfobj *R);
-void dispatch_command(int c, rtfobj *R);
+// Macros
+#define FLOG        (stderr)
+#define LOGPFX      (fprintf(FLOG, "In rtfsed.c:%s() on line %d: ", \
+                     __func__, __LINE__))
+#define LOGBDY(...) (fprintf(FLOG, __VA_ARGS__ ))
+#define LOGSFX      (fprintf(FLOG, "\n" ))
+#define LOG(...)    (LOGPFX && LOGBDY(__VA_ARGS__) && LOGSFX)
 
-void read_command(int c, rtfobj *R);
-void proc_command(rtfobj *R);
+#define ABORT(...)      {LOG(__VA_ARGS__); return;}
 
-void push_attr(rtfobj *R);
-void pop_attr(rtfobj *R);
-
-int pattern_match(rtfobj *R);
-
-void output_match(rtfobj *R);
-void output_raw(rtfobj *R);
-
-void add_to_txt(int c, rtfobj *R);
-void add_to_cmd(int c, rtfobj *R);
-void add_to_raw(int c, rtfobj *R);
-
-void reset_buffers(rtfobj *R);
-void reset_raw_buffer(rtfobj *R);
-void reset_txt_buffer(rtfobj *R);
-void reset_cmd_buffer(rtfobj *R);
-
-void skip_thru_block(rtfobj *R);
-void encode_utf8(int32_t c, char *buf);
-void memzero(void *const p, const size_t n);
-void die(const char *s, const char *f, size_t l);
+#define MAX(x, y)   ((x>y)?x:y)
 
 // #define DEBUG
-
 #ifdef DEBUG
-#define DBUG(...) (fprintf(stderr, __VA_ARGS__))
+    #define DBUG(...) (LOG(__VA_ARGS__))
 #else
-#define DBUG(...) ((void)0)
+    #define DBUG(...) ((void)0)
 #endif
 
 
 
 
 
-
-
 //////////////////////////////////////////////////////////////////////////////
 ////                                                                      ////
-////                   CONSTRUCTOR FOR NEW RTF OBJECTS                    ////
+////             CONSTRUCTOR/DESTRUCTOR FOR NEW RTF OBJECTS               ////
 ////                                                                      ////
 //////////////////////////////////////////////////////////////////////////////
-
 
 rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **dict) {
     size_t i;
-
     rtfobj *R = malloc(sizeof *R);
-    if (!R) DIE("Failed allocating new RTF Object.");
 
+    if (!R) {
+        LOG("Failed allocating new RTF Object.");
+        return NULL;
+    }
+
+    // Set up file streams    
     R->fin = fin;
     R->fout = fout;
-    R->ftxt = NULL;
 
-    #ifdef DEBUG
-        // Try to open text log for plain text debugging output.
-        // Do NOT handle error conditions, since all code will ignore
-        // this FILE* if it is NULL anyway.  If the file fails to open,
-        // then we will fail silently and gracefully. 
-        R->ftxt = fopen("rtfsed-debug.txt", "wb");
-    #endif 
-    
-    // Loop through and find out how many of these replacement fuckers
-    // we have to turn into a proper dictionary form via parallel 
-    // arrays for keys, values, and viability flags. 
+    // Set up replacement dictionary
     for (i=0; dict[i] != NULL; i++); 
     R->dictz = i/2;
-    R->dict_max_keylen = 0;
-    R->dict_match = 0;
+    R->dict_max_keylen = 0UL;
+    R->dict_match = 0UL; 
 
+    // Allocate two lists of pointers
     R->dict_key = malloc(R->dictz * sizeof *R->dict_key);
     R->dict_val = malloc(R->dictz * sizeof *R->dict_val);
-    if (!R->dict_key) DIE("Failed allocating dictionary key pointer array.");
-    if (!R->dict_val) DIE("Failed allocating dictionary value pointer array.");
+    if ((!R->dict_key) || (!R->dict_val)) { 
+        delete_rtfobj(R);
+        LOG("Out of memory allocating key/value pointers!");
+        return NULL; 
+    }
 
+    // Assign those pointers to the strings we were passed. Also track
+    // which key has the longest length (to make comparisons more efficient).
     for (i=0; i < R->dictz; i++) {
-        assert(dict[2*i] != NULL);
-        assert(dict[2*i+1] != NULL);
         R->dict_key[i] = dict[2*i];
         R->dict_val[i] = dict[2*i+1];
-        if (strlen(R->dict_key[i]) > R->dict_max_keylen) {
-            R->dict_max_keylen = strlen(R->dict_key[i]);
-        }
+        R->dict_max_keylen = MAX(R->dict_max_keylen, strlen(R->dict_key[i]));
     }
 
     R->attr = NULL;
-
     R->ri = 0UL;
     R->rawz = RAW_BUFFER_SIZE;
-    memzero(R->raw, R->rawz);
+    memzero(R->raw, RAW_BUFFER_SIZE);
 
     R->ti = 0UL;
     R->txtz = TXT_BUFFER_SIZE;
-    memzero(R->txt, R->txtz);
+    memzero(R->txt, TXT_BUFFER_SIZE);
 
     R->ci = 0UL;
     R->cmdz = CMD_BUFFER_SIZE;
-    memzero(R->cmd, R->cmdz);
+    memzero(R->cmd, CMD_BUFFER_SIZE);
     
+    R->fatalerr = 0;
+
     return R;
 }
 
-
+void delete_rtfobj(rtfobj *R) {
+    if (R) {
+        free(R->dict_key);
+        free(R->dict_val);
+        while (R->attr) {
+            pop_attr(R);
+        }
+    }
+    free(R);
+}
 
 
 
@@ -202,7 +162,6 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **dict) {
 ////                           MAIN LOGIC LOOP                            ////
 ////                                                                      ////
 //////////////////////////////////////////////////////////////////////////////
-
 
 void rtfreplace(rtfobj *R) {
     int c;
@@ -215,18 +174,18 @@ void rtfreplace(rtfobj *R) {
             case '\\':          dispatch_command(c, R);    break;
             default:            dispatch_text(c, R);       break;
         }
+        if (R->fatalerr) ABORT("Encountered a fatal error");
+
         switch (pattern_match(R)) {
             case PARTIAL:        /* Keep reading */        break;
             case MATCH:          output_match(R);          break;
             case NOMATCH:        output_raw(R);            break;
         }
+        if (R->fatalerr) ABORT("Encountered a fatal error");
     }
 
-    // Output remaining unmatched raw buffer, if any
     output_raw(R);
 }
-
-
 
 
 
@@ -240,86 +199,48 @@ void rtfreplace(rtfobj *R) {
 ////                                                                      ////
 //////////////////////////////////////////////////////////////////////////////
 
-
-/*-----------------------------------------\
-|                                          |
-|   Deal with changing RTF scope blocks.   |
-|                                          |
-\-----------------------------------------*/
-void dispatch_scope(int c, rtfobj *R) {
-    R->raw[R->ri++] = c;
-
-    // Open a new scope
-    if (c == '{') {
-        push_attr(R);
-    } 
-    
-    // Close the scope
-    else if (c == '}') {
-        pop_attr(R);
-    }
+static void dispatch_scope(int c, rtfobj *R) {
+    R->raw[R->ri++] = (char)c;
+    if (c == '{') {          push_attr(R);     } 
+    else if (c == '}') {     pop_attr(R);      }
 }
 
 
-/*---------------------------------------------------------------------\
-|                                                                      |
-|   Deal with RTF commands. Complicated - will use helper functions.   |
-|                                                                      |
-\---------------------------------------------------------------------*/
-void dispatch_command(int c, rtfobj *R) {
+static void dispatch_command(int c, rtfobj *R) {
     read_command(c, R);
-    DBUG("Got command: %s\n", R->cmd);
     proc_command(R);
 }
 
 
-/*------------------------------------------\
-|                                           |
-|   Deal with plain text in the RTF file.   |
-|                                           |
-\------------------------------------------*/
-void dispatch_text(int c, rtfobj *R) {
-    // Ignore newlines in RTF code
-    if (c == '\n') {
-        add_to_raw(c, R);
-    } 
-    
-    // Ignore carriage returns in RTF code
-    else if (c == '\r') {
-        add_to_raw(c, R);
-    } 
-    
-    // Consider tabs in RTF code to be interchangeable with spaces
-    else if (c == '\t') {
-        add_to_txt(' ', R);
-        add_to_raw(c, R);
-    } 
-    
-    // Consider vertical tabs in RTF code to be interchangeable with spaces
-    else if (c == '\v') {
-        add_to_txt(' ', R);
-        add_to_raw(c, R);
-    } 
-    
-    // Treat all other text literally, add it to the text buffer as-is
-    else {
-        add_to_txt(c, R);
-        add_to_raw(c, R);
-    }
+static void dispatch_text(int c, rtfobj *R) {
+    // Ignore newlines and carriage returns in RTF code. Consider tabs and
+    // vertical tabs to be interchangeable with spaces. Treat everything else
+    // literally. 
+    if (c == '\n') {          add_to_raw(c, R);                              }
+    else if (c == '\r') {     add_to_raw(c, R);                              } 
+    else if (c == '\t') {     add_to_raw(c, R);      add_to_txt(' ', R);     }
+    else if (c == '\v') {     add_to_raw(c, R);      add_to_txt(' ', R);     }
+    else {                    add_to_raw(c, R);      add_to_txt( c,  R);     }
 }
 
 
-/*--------------------------------------------------------\
-|                                                         |
-|   Check whether the current plain text buffer matches   |
-|   any of the replacement tokens we're looking for.      |
-|                                                         |
-\--------------------------------------------------------*/
-int pattern_match(rtfobj *R) {
+
+
+
+//////////////////////////////////////////////////////////////////////////////
+////                                                                      ////
+////                       PATTERN MATCH FUNCTION                         ////
+////                                                                      ////
+////     Check to see whether we have a match for any of the tokens in    ////
+////     our replacement dictionary.  If NOMATCH, then we should only     ////
+////     invalidate as much as we are SURE could not be part of some      ////
+////     other match. Cf. KMP/Boyer-Moore.                                ////
+////                                                                      ////
+//////////////////////////////////////////////////////////////////////////////
+static int pattern_match(rtfobj *R) {
     size_t i;
 
-    // This part is easy.  If we have shit in the raw buffer, but there is
-    // NO TEXTUAL DATA, then we need to shuttle that shit out to the file.
+    // All raw RTF code without a text counterpart is per se a NOMATCH
     if (R->ri > 0 && R->ti == 0) return NOMATCH;
 
     // Check for complete matches
@@ -330,29 +251,31 @@ int pattern_match(rtfobj *R) {
         }
     }
 
-    // Check for partial matches
+    // Check for partial matches at current offset
     for (i = 0; i < R->dictz; i++) {
         if (!strncmp(R->txt, R->dict_key[i], R->ti)) {
             return PARTIAL;
         }
     }
 
-    // TODO:  Check for late partial matches by iterating through the text
-    //        buffer and trying the same strncmp() loop as above with 
-    //        increasing offsets.  If we get a partial match with an offset,
-    //        then we should do a partial buffer flush up to the offset.
-    //        This will prevent situations where an actual match happens
-    //        after a false start for a different token.  Example:
-    //           file = ... «ll«clname» ...
-    //           txt  = «ll«
-    //        Currently, we would invalidate the match on the second « 
-    //        and return NOMATCH, flushing the entire text buffer and 
-    //        preventing a future MATCH against «clname».  By iterating
-    //        through and looking for partial matches, we would see that
-    //           strncmp(&R->txt[3], R->dict_key[?], R->ti-3)
-    //        is promising, and we would only flush the first four
-    //        characters of the txt buffer.
+    // TODO:  Deal with late partial matches. Example:
+    //             "ATTORNEY" => "Mr. Smith"
+    //             "TORTLOCATION" => "December 12, 2021"
+    //        Text has 
+    //             "THEY CONVENED ATTORTLOCATION..." [sic]
+    //        Current design would fail to replace TORTLOCATION because
+    //        the entirety of the raw buffer corresponding to "ATTORT" would
+    //        be discarded (since the partial match for ATTORNEY was
+    //        invalidated).
+    //
+    //        Instead, we could iterate through and discovery that 
+    //             strncmp(&R->txt[2], R->dict_key[?], R->ti-2)
+    //
+    //        However, unclear what to do then since we don't track what
+    //        part of the text buffer corresponds to what part of the raw
+    //        buffer. 
 
+    // DBUG("R->txt is \'%s\'\n", R->txt);
     return NOMATCH;
 }
 
@@ -360,27 +283,18 @@ int pattern_match(rtfobj *R) {
 
 
 
-
 //////////////////////////////////////////////////////////////////////////////
 ////                                                                      ////
-////                     DISPATCH HELPER FUNCTIONS                        ////
+////                  COMMAND DISPATCH HELPER FUNCTIONS                   ////
 ////                                                                      ////
 ////     Read commands and process a limited subset of them (most are     ////
 ////     not needed for the purposes of simple search-and-replace.        ////
 ////                                                                      ////
 //////////////////////////////////////////////////////////////////////////////
 
-
-/*-----------------------------------------------------------------\
-|                                                                  |
-|   Just read in the command - easy, since very few use special    |
-|   symbols and the rest are alphanumeric in the primary token.    |
-|                                                                  |
-\-----------------------------------------------------------------*/
-void read_command(int c, rtfobj *R) {
+static void read_command(int c, rtfobj *R) {
     R->ci = 0UL;
     memzero(R->cmd, R->cmdz);
-
 
     add_to_cmd(c, R);
     add_to_raw(c, R);
@@ -398,18 +312,12 @@ void read_command(int c, rtfobj *R) {
             add_to_raw(c, R);
             break;
         case '\r':
-            // "The code \<ASCII10> (line feed) or \<ASCIIl3> (carriage
-            // return) is treated as the control word \par. You must include
-            // the backslashes or RTF will ignore the control word."
             add_to_cmd('p', R);
             add_to_cmd('a', R);
             add_to_cmd('r', R);
             add_to_raw('\r', R);
             break;
         case '\n':
-            // "The code \<ASCII10> (line feed) or \<ASCIIl3> (carriage
-            // return) is treated as the control word \par. You must include
-            // the backslashes or RTF will ignore the control word."
             add_to_cmd('p', R);
             add_to_cmd('a', R);
             add_to_cmd('r', R);
@@ -418,118 +326,117 @@ void read_command(int c, rtfobj *R) {
         case '\'':
             add_to_cmd(c, R);
             add_to_raw(c, R);
-            assert((c = fgetc(R->fin)) != EOF);
-            assert(isalnum(c));
+            // Attempt to get two hex digits
+            c = fgetc(R->fin);
+            if (c==EOF) { LOG("Unexpected EOF"); R->fatalerr = EIO; break; }
             add_to_cmd(c, R);
             add_to_raw(c, R);
-            assert((c = fgetc(R->fin)) != EOF);
-            assert(isalnum(c));
+            c = fgetc(R->fin);
+            if (c==EOF) { LOG("Unexpected EOF"); R->fatalerr = EIO; break; }
             add_to_cmd(c, R);
             add_to_raw(c, R);
             break;
         default:
-            assert(isalnum(c));
+            if (!isalnum(c)) { LOG("Invalid command format..."); break; }
             add_to_cmd(c, R);
             add_to_raw(c, R);
+
             while(isalnum(c = fgetc(R->fin))) {
                 add_to_cmd(c, R);
                 add_to_raw(c, R);
             }
-            if (c != EOF) {
-                if (isspace(c)) {
-                    add_to_raw(c, R);
-                } else {
-                    ungetc(c, R->fin);
-                }
-            }
+
+            if (c==EOF) { LOG("Unexpected EOF"); R->fatalerr = EIO; break; }
+
+            if (isspace(c)) {     add_to_raw(c, R);      }
+            else {                ungetc(c, R->fin);     }
             break;
     }
 }
 
 
-/*-----------------------------------------------------------------\
-|                                                                  |
-|   Process a limited subset of commands.  In some situations,     |
-|   that might mean just ignoring everything in the block that     |
-|   comes after them, so that we don't treat it as text.           |
-|                                                                  |
-|   (I am embarrassed about the amount of time I spent debugging   |
-|   my own mistaken use of the regular expressions API...)         |
-|                                                                  |
-\-----------------------------------------------------------------*/
-void proc_command(rtfobj *R) {
+static void proc_command(rtfobj *R) {
     int reml;
+    char *cmd = &R->cmd[1];
+
+    DBUG("Processing RTF control word \'%s\'", R->cmd);
 
     // COMMAND CATEGORY: ESCAPED CHARACTER LITERALS
     if (
-    (!strcmp(R->cmd, "\\\\"))  ||
-    (!strcmp(R->cmd, "\\{"))   ||
-    (!strcmp(R->cmd, "\\}"))   ){
-        add_to_txt(R->cmd[1], R);
+    (!strcmp(cmd, "\\"))  ||
+    (!strcmp(cmd, "{"))   ||
+    (!strcmp(cmd, "}"))   ){
+        add_to_txt(cmd[0], R);
+        R->attr->skippable = false;
         return;
     } 
 
     // COMMAND: MARK NEXT COMMAND AS OPTIONAL
-    if (!strcmp(R->cmd, "\\*")) {
+    if (!strcmp(cmd, "*")) {
         R->attr->skippable = true;
         return;
     } 
 
     // COMMAND: SET THE UNICODE SKIP-BYTE COUNT
-    if (re_match("\\\\uc.*", R->cmd, &reml) > -1) {
-        R->attr->uc = strtoul(&R->cmd[3], NULL, 10);
+    if (re_match("uc[0-9]*$", cmd, &reml) > -1) {
+        DBUG("Got a \\ucN control word: \'%s\'", R->cmd);
+        R->attr->uc = strtoul(&cmd[2], NULL, 10);
+        R->attr->skippable = false;
         return;
     } 
 
     // COMMAND: UNICODE CODE POINT SPECIFICATION
-    if (re_match("\\\\u[0-9]*$", R->cmd, &reml) > -1) {
-        char utf8[5] = { '\0' };
-        int32_t c;
+    if (re_match("u[0-9]*$", cmd, &reml) > -1) {
+        char utf8[8] = { 0 };
         char *p;
 
-        c = strtoul(&R->cmd[2], NULL, 10);
-        encode_utf8(c, utf8);
+        DBUG("Got a \\uN control word: \'%s\'", R->cmd);
+        encode_utf8(strtoul(&cmd[1], NULL, 10), utf8);
+        R->attr->skipbytes = 0;
         for (p = utf8; *p != '\0'; p++) add_to_txt(*p, R);
-
-        // We need to implement the other end of this in the add_to_txt function
         R->attr->skipbytes = R->attr->uc;
+        // TODO: Implement skipbytes in add_to_txt function
 
+        R->attr->skippable = false;
         return;
     } 
     
     // COMMAND: CODE PAGE CODE POINT SPECIFICATION
-    //    TODO: Take the actual code page into account instead of just praying
-    if (re_match("\\\\\\\'[0-9A-Fa-f][0-9A-Fa-f]$", R->cmd, &reml) > -1) {
+    if (re_match("\'[0-9A-Fa-f][0-9A-Fa-f]$", cmd, &reml) > -1) {
         char utf8[5] = { '\0' };
         int32_t c;
         char *p;
-
+        
+        DBUG("Got a \\'xx control word: \'%s\'", R->cmd);
         c = strtoul(&R->cmd[2], NULL, 16);
         encode_utf8(c, utf8);
         for (p = utf8; *p != '\0'; p++) add_to_txt(*p, R);
 
+        R->attr->skippable = false;
         return;
     } 
 
     // COMMAND CATEGORY: ALL THE SKIPPABLE SHIT I DON'T CARE ABOUT WITH 
     // WEIRD PARAMETER DATA THAT WILL FUCK UP MY TEXT-MATCHING
     if (
-    (re_match("\\\\fonttbl", R->cmd, &reml) > -1)     ||
-    (re_match("\\\\pict", R->cmd, &reml) > -1)        ||
-    (re_match("\\\\colortbl", R->cmd, &reml) > -1)    ||
-    (re_match("\\\\stylesheet", R->cmd, &reml) > -1)  ||
-    (re_match("\\\\operator", R->cmd, &reml) > -1)    ){
+    (re_match("fonttbl$",    cmd, &reml) > -1)  ||
+    (re_match("pict$",       cmd, &reml) > -1)  ||
+    (re_match("colortbl$",   cmd, &reml) > -1)  ||
+    (re_match("stylesheet$", cmd, &reml) > -1)  ||
+    (re_match("operator$",   cmd, &reml) > -1)  ){
         skip_thru_block(R);
+        R->attr->skippable = false;
         return;
     } 
 
-    // COMMAND CATEGORY: EVERYTHING WE WANT TO SHOW UP AS A LINE BREAK
-    // IN THE PLAIN TEXT EXTRACTION OF THIS RTF FILE.
+    // COMMAND CATEGORY: EVERYTHING ~~ LINE BREAK
     if (
-    (re_match("\\\\line", R->cmd, &reml) > -1)  ||
-    (re_match("\\\\par", R->cmd, &reml) > -1)   ||
-    (re_match("\\\\pard", R->cmd, &reml) > -1)  ){
+    (re_match("line$", cmd, &reml) > -1)  ||
+    (re_match("par$",  cmd, &reml) > -1)  ||
+    (re_match("pard$", cmd, &reml) > -1)  ){
+        DBUG("Got a newline-indicating control word: \'%s\'", R->cmd);
         add_to_txt('\n', R);
+        R->attr->skippable = false;
         return;
     } 
 
@@ -540,10 +447,7 @@ void proc_command(rtfobj *R) {
             R->attr->skippable = false;
         }
     }
-
 }
-
-
 
 
 
@@ -555,66 +459,62 @@ void proc_command(rtfobj *R) {
 ////                                                                      ////
 //////////////////////////////////////////////////////////////////////////////
 
-
-void add_to_txt(int c, rtfobj *R) {
-    if (R->ftxt) fputc(c, R->ftxt); 
-    if (R->ftxt) fflush(R->ftxt);
-
+static void add_to_txt(int c, rtfobj *R) {
     if (!(R->ti < R->txtz - 1)) {
-        DBUG("We have exhausted the txt buffer.\n");
-        DBUG("R->ti = %zu\n", R->ti);
-        DBUG("Last txt data:\n");
-        DBUG("%s\n", &R->txt[R->ti - 80]);
-        DIE("Assertion failed: (R->ti < R->txtz - 1)");
+        LOG("Exhausted txt buffer.");
+        LOG("R->ti = %zu. Last txt data: \'%s\'", R->ti, &R->txt[R->ti-80]);
+        LOG("No match within limits. Flushing buffers, attempting recovery");
+        output_raw(R);
+        reset_buffers(R);
     }
-    R->txt[R->ti++] = c;
+    R->txt[R->ti++] = (char)c;
 }
 
 
-void add_to_cmd(int c, rtfobj *R) {
+static void add_to_cmd(int c, rtfobj *R) {
     if (!(R->ci < R->cmdz - 1)) {
-        DBUG("We have exhausted the cmd buffer.\n");
-        DBUG("R->ci = %zu\n", R->ci);
-        DBUG("Last cmd data:\n");
-        DBUG("%s\n", &R->cmd[R->ci - 80]);
-        DIE("Assertion failed: (R->ci < R->cmdz - 1)");
+        LOG("Exhausted cmd buffer.");
+        LOG("R->ci = %zu. Last cmd data: \'%s\'", R->ci, &R->cmd[R->ci-80]);
+        LOG("No match within limits. Flushing buffers, attempting recovery");
+        output_raw(R);
+        reset_buffers(R);
     }
-    R->cmd[R->ci++] = c;
+    R->cmd[R->ci++] = (char)c;
 }
 
 
-void add_to_raw(int c, rtfobj *R) {
+static void add_to_raw(int c, rtfobj *R) {
     if (!(R->ri < R->rawz - 1)) {
-        DBUG("We have exhausted the raw buffer.\n");
-        DBUG("R->ri = %zu\n", R->ri);
-        DBUG("Last raw data:\n");
-        DBUG("%s\n", &R->raw[R->ri - 80]);
-        DIE("Assertion failed: (R->ri < R->rawz - 1)");
+        LOG("Exhausted raw buffer.");
+        LOG("R->ri = %zu. Last raw data: \'%s\'", R->ri, &R->raw[R->ri-80]);
+        LOG("No match within limits. Flushing buffers, attempting recovery");
+        output_raw(R);
+        reset_buffers(R);
     }
-    R->raw[R->ri++] = c;
+    R->raw[R->ri++] = (char)c;
 }
 
 
-void reset_buffers(rtfobj *R) {
+static void reset_buffers(rtfobj *R) {
     reset_raw_buffer(R);
     reset_txt_buffer(R);
     reset_cmd_buffer(R);
 }
 
 
-void reset_raw_buffer(rtfobj *R) {
+static void reset_raw_buffer(rtfobj *R) {
     R->ri = 0UL;
     memzero(R->raw, R->rawz);
 }
 
 
-void reset_txt_buffer(rtfobj *R) {
+static void reset_txt_buffer(rtfobj *R) {
     R->ti = 0UL;
     memzero(R->txt, R->txtz);
 }
 
 
-void reset_cmd_buffer(rtfobj *R) {
+static void reset_cmd_buffer(rtfobj *R) {
     R->ci = 0UL;
     memzero(R->cmd, R->cmdz);
 }
@@ -692,7 +592,11 @@ void skip_thru_block(rtfobj *R) {
 void push_attr(rtfobj *R) {
     rtfattr *newattr = malloc(sizeof *newattr);
 
-    if (!newattr) DIE("Failed allocating new attribute scope.");
+    if (!newattr) {
+        LOG("Out-of-memory allocating new attribute scope.");
+        R->fatalerr = ENOMEM;
+        return;
+    }
 
     if (R->attr == NULL) {
         newattr->uc = 0;
@@ -712,11 +616,15 @@ void push_attr(rtfobj *R) {
 void pop_attr(rtfobj *R) {
     rtfattr *oldattr;
 
-    if (!R->attr) DIE("Attempt to pop non-existent attribute set off stack!");
-
-    oldattr = R->attr;             // Point it at the current attribute set
-    R->attr = oldattr->outer;      // Modify structure to point to outer scope
-    free(oldattr);                 // Delete the old attribute set
+    if (!R->attr) {
+        LOG("Attempt to pop non-existent attribute set off stack!");
+        LOG("Ignoring likely off-by-one error and hoping for the best");
+        return;
+    } else {
+        oldattr = R->attr;        // Point it at the current attribute set
+        R->attr = oldattr->outer; // Modify structure to point to outer scope
+        free(oldattr);            // Delete the old attribute set
+    }
 }
 
 
@@ -734,22 +642,32 @@ void pop_attr(rtfobj *R) {
 
 void encode_utf8(int32_t c, char *utf8) {
     if (c < 0x80) {
-        utf8[0] = (c>>0  &  0b01111111)  |  0b00000000; 
+        // (__ & 01111111)|00000000  ==> 0xxx xxxx
+        utf8[0] = (char)(c>>0  &  0x7F) | 0x00;  
     }
     else if (c < 0x0800) {
-        utf8[0] = (c>>6  &  0b00011111)  |  0b11000000;
-        utf8[1] = (c>>0  &  0b00111111)  |  0b10000000;
+        // (__ & 00011111)|11000000  ==> 110x xxxx
+        // (__ & 00111111)|10000000  ==> 10xx xxxx
+        utf8[0] = (char)(c>>6 & 0x1F) | 0xC0;
+        utf8[1] = (char)(c>>0 & 0x3F) | 0x80;
     }
     else if (c < 0x010000) {
-        utf8[0] = (c>>12 &  0b00001111)  |  0b11100000;
-        utf8[1] = (c>>6  &  0b00111111)  |  0b10000000;
-        utf8[2] = (c>>0  &  0b00111111)  |  0b10000000;
+        // (__ & 00001111)|11100000  ==> 1110 1111
+        // (__ & 00111111)|10000000  ==> 10xx xxxx
+        // (__ & 00111111)|10000000  ==> 10xx xxxx
+        utf8[0] = (char)(c>>12 &  0x0F) | 0xE0; 
+        utf8[1] = (char)(c>>6  &  0x3F) | 0x80;
+        utf8[2] = (char)(c>>0  &  0x3F) | 0x80;
     }
     else if (c < 0x110000) {
-        utf8[0] = (c>>18 &  0b00000111)  |  0b11110000;
-        utf8[1] = (c>>12 &  0b00111111)  |  0b10000000;
-        utf8[2] = (c>>6  &  0b00111111)  |  0b10000000;
-        utf8[3] = (c>>0  &  0b00111111)  |  0b10000000;
+        // (__ & 00000111)|11110000  ==> 1111 0111
+        // (__ & 00111111)|10000000  ==> 10xx xxxx
+        // (__ & 00111111)|10000000  ==> 10xx xxxx
+        // (__ & 00111111)|10000000  ==> 10xx xxxx
+        utf8[0] = (char)(c>>18 &  0x07) | 0xF0;
+        utf8[1] = (char)(c>>12 &  0x3F) | 0x80;
+        utf8[2] = (char)(c>>6  &  0x3F) | 0x80;
+        utf8[3] = (char)(c>>0  &  0x3F) | 0x80;
     }
 }
 
@@ -759,10 +677,4 @@ void memzero(void *const p, const size_t n) {
     for (; p_  <  (volatile unsigned char *volatile) p + n; p_++) {
         *p_ = 0U;
     }
-}
-
-
-void die(const char *s, const char *f, size_t l) {
-    fprintf(stderr, "Died on line %zu of function %s:\n    %s\n\n\n", l, f, s);
-    exit(EXIT_FAILURE);
 }

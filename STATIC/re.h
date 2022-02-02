@@ -27,8 +27,8 @@
  *
  */
 
-#ifndef _TINY_REGEX_C
-#define _TINY_REGEX_C
+#ifndef TINY_REGEX_C__
+#define TINY_REGEX_C__
 
 
 #ifndef RE_DOT_MATCHES_NEWLINE
