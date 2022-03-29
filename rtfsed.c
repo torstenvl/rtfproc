@@ -1,21 +1,22 @@
 // ---------------------------------------------------------------------------- 
-// LIMITATIONS
-//
-//   - We use a fixed buffer sizes for raw RTF code, text, and RTF control
-//     words. Right now this is brittle.  TODO: If we reach end of buffer
-//     then emit message, output raw RTF code, and reset buffers.  This 
-//     prevents memory errors and corruption and, at worst, will just fail
-//     to work with overly long tokens. 
-//
 // TODO
 //   - Add attributes for \ansicpgN, font tables with \fcharsetN and/or
 //     \cpgN, and \cchsN. Interpret \'xx according to current character set
 //     or code page. 
 //
+//   - Implement a font table. Because document fonttbl entries are not 
+//     guaranteed to be in consecutive ordinal order, it may be highly
+//     space-inefficient to store font table entries in a sparse array,
+//     though it would give O(1) access. The next best way might be to store
+//     them in a dense sorted array of fonttbl entries, with insertion/
+//     insertion sort and binary search retrieval. This should give O(log N)
+//     access. 
+//
 //   - Normalize replacement tokens as well as any Unicode in the text before
-//     comparison.  Use NFC normalization.
+//     comparison.  Use NFC (or maybe NFD?) normalization.
 //   
-//   - Add additional areas where we skip blocks for large data types. 
+//   - Add additional areas where we skip blocks for large data types.  This
+//     should, at a minimum, include \binN
 // ---------------------------------------------------------------------------- 
 
 
@@ -36,6 +37,7 @@
 #include <assert.h>
 #include "rtfsed.h"
 #include "STATIC/re.h"
+#include "STATIC/cpgtou.h"
 
 // Internal function declarations
 static void dispatch_scope(int c, rtfobj *R);
@@ -49,6 +51,7 @@ static int  pattern_match(rtfobj *R);
 static void output_match(rtfobj *R);
 static void output_raw(rtfobj *R);
 static void add_to_txt(int c, rtfobj *R);
+static void add_string_to_txt(const char *s, rtfobj *R);
 static void add_to_cmd(int c, rtfobj *R);
 static void add_to_raw(int c, rtfobj *R);
 static void reset_buffers(rtfobj *R);
@@ -56,27 +59,28 @@ static void reset_raw_buffer(rtfobj *R);
 static void reset_txt_buffer(rtfobj *R);
 static void reset_cmd_buffer(rtfobj *R);
 static void skip_thru_block(rtfobj *R);
-static void encode_utf8(int32_t c, char *buf);
+
+static void encode_utf8(int32_t c, char utf8[5]);
 static void memzero(void *const p, const size_t n);
+static int32_t get_num_arg(const char *s);
+static int32_t get_hex_arg(const char *s);
 
 // Macros
-#define FLOG        (stderr)
-#define LOGPFX      (fprintf(FLOG, "In rtfsed.c:%s() on line %d: ", \
-                     __func__, __LINE__))
-#define LOGBDY(...) (fprintf(FLOG, __VA_ARGS__ ))
-#define LOGSFX      (fprintf(FLOG, "\n" ))
-#define LOG(...)    (LOGPFX && LOGBDY(__VA_ARGS__) && LOGSFX)
+#define LOG(...) (fprintf(stderr, "In rtfsed.c:%s() on line %d: ", \
+                  __func__, __LINE__) \
+                  && fprintf(stderr, __VA_ARGS__ ) \
+                  && fprintf(stderr, "\n"))
 
-#define ABORT(...)      {LOG(__VA_ARGS__); return;}
-
-#define MAX(x, y)   ((x>y)?x:y)
+// Macros specific to proc_command()
+#define REGEX_MATCH(x, y)    (re_match(y, x, NULL) > -1)
+#define STRING_MATCH(x, y)   (!strcmp(x, y))
 
 // #define DEBUG
-#ifdef DEBUG
-    #define DBUG(...) (LOG(__VA_ARGS__))
-#else
-    #define DBUG(...) ((void)0)
-#endif
+// #ifdef DEBUG
+//     #define DBUG(...) (LOG(__VA_ARGS__))
+// #else
+//     #define DBUG(...) ((void)0)
+// #endif
 
 
 
@@ -121,7 +125,9 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **dict) {
     for (i=0; i < R->dictz; i++) {
         R->dict_key[i] = dict[2*i];
         R->dict_val[i] = dict[2*i+1];
-        R->dict_max_keylen = MAX(R->dict_max_keylen, strlen(R->dict_key[i]));
+        if (R->dict_max_keylen < strlen(R->dict_key[i])) {
+            R->dict_max_keylen = strlen(R->dict_key[i]);
+        }
     }
 
     R->attr = NULL;
@@ -174,14 +180,14 @@ void rtfreplace(rtfobj *R) {
             case '\\':          dispatch_command(c, R);    break;
             default:            dispatch_text(c, R);       break;
         }
-        if (R->fatalerr) ABORT("Encountered a fatal error");
+        if (R->fatalerr)  {  LOG("Encountered a fatal error");  return;  }
 
         switch (pattern_match(R)) {
             case PARTIAL:        /* Keep reading */        break;
             case MATCH:          output_match(R);          break;
             case NOMATCH:        output_raw(R);            break;
         }
-        if (R->fatalerr) ABORT("Encountered a fatal error");
+        if (R->fatalerr)  {  LOG("Encountered a fatal error");  return;  }
     }
 
     output_raw(R);
@@ -201,8 +207,8 @@ void rtfreplace(rtfobj *R) {
 
 static void dispatch_scope(int c, rtfobj *R) {
     R->raw[R->ri++] = (char)c;
-    if (c == '{') {          push_attr(R);     } 
-    else if (c == '}') {     pop_attr(R);      }
+    if      (c == '{')  push_attr(R);
+    else if (c == '}')  pop_attr(R);
 }
 
 
@@ -216,7 +222,7 @@ static void dispatch_text(int c, rtfobj *R) {
     // Ignore newlines and carriage returns in RTF code. Consider tabs and
     // vertical tabs to be interchangeable with spaces. Treat everything else
     // literally. 
-    if (c == '\n') {          add_to_raw(c, R);                              }
+    if      (c == '\n') {     add_to_raw(c, R);                              }
     else if (c == '\r') {     add_to_raw(c, R);                              } 
     else if (c == '\t') {     add_to_raw(c, R);      add_to_txt(' ', R);     }
     else if (c == '\v') {     add_to_raw(c, R);      add_to_txt(' ', R);     }
@@ -268,14 +274,13 @@ static int pattern_match(rtfobj *R) {
     //        be discarded (since the partial match for ATTORNEY was
     //        invalidated).
     //
-    //        Instead, we could iterate through and discovery that 
+    //        Instead, we could iterate through and discover that 
     //             strncmp(&R->txt[2], R->dict_key[?], R->ti-2)
     //
     //        However, unclear what to do then since we don't track what
     //        part of the text buffer corresponds to what part of the raw
     //        buffer. 
 
-    // DBUG("R->txt is \'%s\'\n", R->txt);
     return NOMATCH;
 }
 
@@ -356,85 +361,77 @@ static void read_command(int c, rtfobj *R) {
 
 
 static void proc_command(rtfobj *R) {
-    int reml;
     char *cmd = &R->cmd[1];
-
-    DBUG("Processing RTF control word \'%s\'", R->cmd);
 
     // COMMAND CATEGORY: ESCAPED CHARACTER LITERALS
     if (
-    (!strcmp(cmd, "\\"))  ||
-    (!strcmp(cmd, "{"))   ||
-    (!strcmp(cmd, "}"))   ){
+    (STRING_MATCH(cmd, "\\"))  ||
+    (STRING_MATCH(cmd, "{"))   ||
+    (STRING_MATCH(cmd, "}"))   ){
         add_to_txt(cmd[0], R);
         R->attr->skippable = false;
         return;
     } 
 
     // COMMAND: MARK NEXT COMMAND AS OPTIONAL
-    if (!strcmp(cmd, "*")) {
+    if (STRING_MATCH(cmd, "*")) {
         R->attr->skippable = true;
         return;
     } 
 
     // COMMAND: SET THE UNICODE SKIP-BYTE COUNT
-    if (re_match("uc[0-9]*$", cmd, &reml) > -1) {
-        DBUG("Got a \\ucN control word: \'%s\'", R->cmd);
-        R->attr->uc = strtoul(&cmd[2], NULL, 10);
+    if (REGEX_MATCH(cmd, "^uc[0-9]*$")) {
+        R->attr->uc = (size_t)get_num_arg(cmd);
         R->attr->skippable = false;
         return;
     } 
 
     // COMMAND: UNICODE CODE POINT SPECIFICATION
-    if (re_match("u[0-9]*$", cmd, &reml) > -1) {
-        char utf8[8] = { 0 };
-        char *p;
+    if (REGEX_MATCH(cmd, "^u[0-9]*$")) {
+        char utf8[5];
 
-        DBUG("Got a \\uN control word: \'%s\'", R->cmd);
-        encode_utf8(strtoul(&cmd[1], NULL, 10), utf8);
-        R->attr->skipbytes = 0;
-        for (p = utf8; *p != '\0'; p++) add_to_txt(*p, R);
+        encode_utf8(get_num_arg(cmd), utf8);
+        add_string_to_txt(utf8, R);
         R->attr->skipbytes = R->attr->uc;
-        // TODO: Implement skipbytes in add_to_txt function
 
         R->attr->skippable = false;
         return;
     } 
     
     // COMMAND: CODE PAGE CODE POINT SPECIFICATION
-    if (re_match("\'[0-9A-Fa-f][0-9A-Fa-f]$", cmd, &reml) > -1) {
-        char utf8[5] = { '\0' };
-        int32_t c;
-        char *p;
+    if (REGEX_MATCH(cmd, "^\'[0-9A-Fa-f][0-9A-Fa-f]$")) {
+        char utf8[5];
         
-        DBUG("Got a \\'xx control word: \'%s\'", R->cmd);
-        c = strtoul(&R->cmd[2], NULL, 16);
-        encode_utf8(c, utf8);
-        for (p = utf8; *p != '\0'; p++) add_to_txt(*p, R);
+        if (R->attr->skipbytes) {
+            R->attr->skipbytes--;
+        } else {
+            // TODO: CONVERT FROM CODE PAGE TO UNICODE
+            encode_utf8(get_hex_arg(cmd), utf8);
+            add_string_to_txt(utf8, R);
+        }
 
         R->attr->skippable = false;
         return;
     } 
 
-    // COMMAND CATEGORY: ALL THE SKIPPABLE SHIT I DON'T CARE ABOUT WITH 
-    // WEIRD PARAMETER DATA THAT WILL FUCK UP MY TEXT-MATCHING
+    // COMMAND CATEGORY: ALL THE SKIPPABLE STUFF I DON'T CARE ABOUT WITH 
+    // WEIRD PARAMETER DATA THAT WILL MESS UP MY TEXT-MATCHING
     if (
-    (re_match("fonttbl$",    cmd, &reml) > -1)  ||
-    (re_match("pict$",       cmd, &reml) > -1)  ||
-    (re_match("colortbl$",   cmd, &reml) > -1)  ||
-    (re_match("stylesheet$", cmd, &reml) > -1)  ||
-    (re_match("operator$",   cmd, &reml) > -1)  ){
+    (REGEX_MATCH(cmd, "fonttbl$"))     ||
+    (REGEX_MATCH(cmd, "pict$"))        ||
+    (REGEX_MATCH(cmd, "colortbl$"))    ||
+    (REGEX_MATCH(cmd, "stylesheet$"))  ||
+    (REGEX_MATCH(cmd, "operator$"))    ){
         skip_thru_block(R);
         R->attr->skippable = false;
         return;
     } 
 
-    // COMMAND CATEGORY: EVERYTHING ~~ LINE BREAK
+    // COMMAND CATEGORY: LINE/PARAGRAPH BREAKS
     if (
-    (re_match("line$", cmd, &reml) > -1)  ||
-    (re_match("par$",  cmd, &reml) > -1)  ||
-    (re_match("pard$", cmd, &reml) > -1)  ){
-        DBUG("Got a newline-indicating control word: \'%s\'", R->cmd);
+    (REGEX_MATCH(cmd, "line$"))  ||
+    (REGEX_MATCH(cmd, "par$"))   ||
+    (REGEX_MATCH(cmd, "pard$"))  ){
         add_to_txt('\n', R);
         R->attr->skippable = false;
         return;
@@ -467,7 +464,26 @@ static void add_to_txt(int c, rtfobj *R) {
         output_raw(R);
         reset_buffers(R);
     }
-    R->txt[R->ti++] = (char)c;
+    if (R->attr->skipbytes) {
+        R->attr->skipbytes--;
+    } else {
+        R->txt[R->ti++] = (char)c;
+    }
+}
+
+
+static void add_string_to_txt(const char *s, rtfobj *R) {
+    size_t len = strlen(s);
+
+    if (!(R->ti < R->txtz - len)) {
+        LOG("Exhausted txt buffer.");
+        LOG("R->ti = %zu. Last txt data: \'%s\'", R->ti, &R->txt[R->ti-80]);
+        LOG("No match within limits. Flushing buffers, attempting recovery");
+        output_raw(R);
+        reset_buffers(R);
+    }
+
+    while (*s) R->txt[R->ti++] = *s++;
 }
 
 
@@ -531,8 +547,7 @@ static void reset_cmd_buffer(rtfobj *R) {
 ////                                                                      ////
 //////////////////////////////////////////////////////////////////////////////
 
-
-void output_match(rtfobj *R) {
+static void output_match(rtfobj *R) {
     size_t len = strlen(R->dict_val[R->dict_match]);
 
     fwrite(R->dict_val[R->dict_match], 1, len, R->fout);
@@ -553,13 +568,13 @@ void output_match(rtfobj *R) {
 }
 
 
-void output_raw(rtfobj *R) {
+static void output_raw(rtfobj *R) {
     fwrite(R->raw, 1, R->ri, R->fout);
     reset_buffers(R);
 }
 
 
-void skip_thru_block(rtfobj *R) {
+static void skip_thru_block(rtfobj *R) {
     int braces = 1;
     int c;
     int clast = '\0';
@@ -589,7 +604,7 @@ void skip_thru_block(rtfobj *R) {
 ////                                                                      ////
 //////////////////////////////////////////////////////////////////////////////
 
-void push_attr(rtfobj *R) {
+static void push_attr(rtfobj *R) {
     rtfattr *newattr = malloc(sizeof *newattr);
 
     if (!newattr) {
@@ -613,7 +628,7 @@ void push_attr(rtfobj *R) {
 }
 
 
-void pop_attr(rtfobj *R) {
+static void pop_attr(rtfobj *R) {
     rtfattr *oldattr;
 
     if (!R->attr) {
@@ -639,28 +654,30 @@ void pop_attr(rtfobj *R) {
 ////                                                                      ////
 //////////////////////////////////////////////////////////////////////////////
 
-
-void encode_utf8(int32_t c, char *utf8) {
+static void encode_utf8(int32_t c, char utf8[5]) {
     if (c < 0x80) {
         // (__ & 01111111)|00000000  ==> 0xxx xxxx
         utf8[0] = (char)(c>>0  &  0x7F) | 0x00;  
+        utf8[1] = '\0';
     }
     else if (c < 0x0800) {
         // (__ & 00011111)|11000000  ==> 110x xxxx
         // (__ & 00111111)|10000000  ==> 10xx xxxx
         utf8[0] = (char)(c>>6 & 0x1F) | 0xC0;
         utf8[1] = (char)(c>>0 & 0x3F) | 0x80;
+        utf8[2] = '\0';
     }
     else if (c < 0x010000) {
-        // (__ & 00001111)|11100000  ==> 1110 1111
+        // (__ & 00001111)|11100000  ==> 1110 xxxx
         // (__ & 00111111)|10000000  ==> 10xx xxxx
         // (__ & 00111111)|10000000  ==> 10xx xxxx
         utf8[0] = (char)(c>>12 &  0x0F) | 0xE0; 
         utf8[1] = (char)(c>>6  &  0x3F) | 0x80;
         utf8[2] = (char)(c>>0  &  0x3F) | 0x80;
+        utf8[3] = '\0';
     }
     else if (c < 0x110000) {
-        // (__ & 00000111)|11110000  ==> 1111 0111
+        // (__ & 00000111)|11110000  ==> 1111 0xxx
         // (__ & 00111111)|10000000  ==> 10xx xxxx
         // (__ & 00111111)|10000000  ==> 10xx xxxx
         // (__ & 00111111)|10000000  ==> 10xx xxxx
@@ -668,13 +685,42 @@ void encode_utf8(int32_t c, char *utf8) {
         utf8[1] = (char)(c>>12 &  0x3F) | 0x80;
         utf8[2] = (char)(c>>6  &  0x3F) | 0x80;
         utf8[3] = (char)(c>>0  &  0x3F) | 0x80;
+        utf8[4] = '\0';
     }
 }
 
 
-void memzero(void *const p, const size_t n) {
+static void memzero(void *const p, const size_t n) {
     volatile unsigned char *volatile p_ = (volatile unsigned char *volatile) p;
     for (; p_  <  (volatile unsigned char *volatile) p + n; p_++) {
         *p_ = 0U;
     }
+}
+
+
+static int32_t get_num_arg(const char *s) {
+    const char *valid="0123456789-";
+    const char *p;
+    int32_t n;
+
+    p = s;
+    while (!strchr(valid, *p)) p++;
+
+    sscanf(p, "%"SCNd32, &n);
+
+    return n;
+}
+
+
+static int32_t get_hex_arg(const char *s) {
+    const char *valid="0123456789ABCDEFabcdef-";
+    const char *p;
+    int32_t n;
+
+    p = s;
+    while (!strchr(valid, *p)) p++;
+
+    sscanf(p, "%"SCNx32, &n);
+
+    return n;
 }
