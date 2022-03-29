@@ -19,16 +19,22 @@
 #define   MATCH                 1
 
 
-
 // STRUCTURE DEFINITIONS
 typedef struct rtfattr {
     size_t uc;
     size_t skipbytes;
     cpg_t  cpg;
+    // Indicate which font
     bool   skippable; 
 
     struct rtfattr *outer;
 } rtfattr;
+
+
+typedef struct font {
+    int8_t  N;
+    cpg_t   cpg;
+} font;
 
 
 typedef struct rtfobj {
@@ -58,6 +64,8 @@ typedef struct rtfobj {
     int             fatalerr;     // Quick way to trigger exit of rtf 
                                   // processing without taking down the whole
                                   // program. 
+
+    // FONT TABLE
 } rtfobj;
 
 
