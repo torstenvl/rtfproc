@@ -1,6 +1,7 @@
 EXE = rtfsed
-HDR = STATIC/*.h   rtfsed.h 
-SRC = STATIC/*.c   rtfsed.c   main.c
+EXTRA = DOCS/new.rtf
+HDR = STATIC/*.h   *.h 
+SRC = STATIC/*.c   *.c
 
 
 
@@ -8,12 +9,13 @@ CC = cc
 
 RFLAGS = -std=c17 -Oz
 DFLAGS = -std=c17 -O0 -gfull  
-SFLAGS = -W -Wall -Werror -Wno-poison-system-directories -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wreturn-type -Wcast-qual -Wswitch -Wshadow -Wcast-align -Wwrite-strings -Wmisleading-indentation
+SFLAGS = -W -Wall  -Werror  -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wreturn-type -Wcast-qual -Wswitch -Wshadow -Wcast-align -Wwrite-strings -Wmisleading-indentation
 SSFLAGS = -Wunused-parameter -Wchar-subscripts -Winline -Wnested-externs -Wredundant-decls
+SSSFLAGS = -Weverything -Wno-padded -Wno-poison-system-directories -Wno-unused-function 
 
 
 
-all: superstrict
+all: superstrictest
 
 release: $(SRC) $(HDR)
 	$(CC) $(RFLAGS) $(SRC) -o $(EXE)
@@ -28,6 +30,9 @@ strict: $(SRC) $(HDR)
 superstrict: $(SRC) $(HDR)
 	$(CC) $(SFLAGS) $(SSFLAGS) $(DFLAGS) $(SRC) -o $(EXE)
 
+superstrictest: $(SRC) $(HDR)
+	$(CC) $(SFLAGS) $(SSFLAGS) $(SSSFLAGS) $(DFLAGS) $(SRC) -o $(EXE)
+
 
 clean:
-	rm -Rf core *.o *~ $(EXE) $(EXE).dSYM/ DOCS/new.rtf
+	rm -Rf core *.o *~ $(EXE) $(EXE).dSYM/ $(EXTRA)
