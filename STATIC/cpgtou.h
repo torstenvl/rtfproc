@@ -84,6 +84,7 @@ FOR ANY DAMAGES OF ANY KIND RESULTING FROM THE USE OF THIS WORK.          \n\
 Permission to use, copy, modify, and/or distribute this work for any      \n\
 purpose is hereby granted, provided this notice appears in all copies.    \n";
 
+
 typedef enum cpg_t {
     CPG_42    = 42,       // ❌ Windows Symbol
     CPG_437   = 437,      // OEM/IBM United States
@@ -4634,7 +4635,6 @@ static int32_t cpgtou(cpg_t cpg, uint16_t cpt, int32_t **mult) {
                 default: *mult = NULL; r = (c<128)?c : CPG_10005_TBL[c-128];
             }
             break;
-
     }
    
     return r;
