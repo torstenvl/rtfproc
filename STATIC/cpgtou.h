@@ -231,7 +231,7 @@ typedef enum cpg_t {
 |                                                                            |
 \*--------------------------------------------------------------------------*/
 
-static int32_t cpgtou(cpg_t cpg, uint16_t cpt, int32_t **mult) {
+static int32_t cpgtou(cpg_t cpg, uint16_t cpt, const int32_t **mult) {
 
     static const int32_t CPG_437_TBL[128] = {
         0x00C7,  0x00FC,  0x00E9,  0x00E2,  0x00E4,  0x00E0,  0x00E5,  0x00E7,

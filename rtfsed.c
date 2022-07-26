@@ -1,9 +1,5 @@
 // ---------------------------------------------------------------------------- 
 // TODO
-//   - Add attributes for \ansicpgN, font tables with \fcharsetN and/or
-//     \cpgN, and \cchsN. Interpret \'xx according to current character set
-//     or code page. 
-//
 //   - Implement a font table. Because document fonttbl entries are not 
 //     guaranteed to be in consecutive ordinal order, it may be highly
 //     space-inefficient to store font table entries in a sparse array,
@@ -11,6 +7,10 @@
 //     them in a dense sorted array of fonttbl entries, with insertion/
 //     insertion sort and binary search retrieval. This should give O(log N)
 //     access. 
+//
+//   - Add attributes for \ansicpgN, font tables with \fcharsetN and/or
+//     \cpgN, and \cchsN. Interpret \'xx according to current character set
+//     or code page. 
 //
 //   - Normalize replacement tokens as well as any Unicode in the text before
 //     comparison.  Use NFC (or maybe NFD?) normalization.
@@ -66,22 +66,22 @@ static int32_t get_num_arg(const char *s);
 static int32_t get_hex_arg(const char *s);
 
 // Macros
-#define LOG(...) (fprintf(stderr, "In rtfsed.c:%s() on line %d: ", \
-                  __func__, __LINE__) \
-                  && fprintf(stderr, __VA_ARGS__ ) \
-                  && fprintf(stderr, "\n"))
 
 // Macros specific to proc_command()
 #define REGEX_MATCH(x, y)    (re_match(y, x, NULL) > -1)
 #define STRING_MATCH(x, y)   (!strcmp(x, y))
 
-// #define DEBUG
-// #ifdef DEBUG
-//     #define DBUG(...) (LOG(__VA_ARGS__))
-// #else
-//     #define DBUG(...) ((void)0)
-// #endif
-
+// Macros for logging and debugging
+#define RTFDEBUG
+#ifdef RTFDEBUG
+    #define DBUG(...) (LOG(__VA_ARGS__))
+#else
+    #define DBUG(...) ((void)0)
+#endif
+#define LOG(...) (fprintf(stderr, "In rtfsed.c:%s() on line %d: ", \
+                  __func__, __LINE__) \
+                  && fprintf(stderr, __VA_ARGS__ ) \
+                  && fprintf(stderr, "\n"))
 
 
 
@@ -92,7 +92,7 @@ static int32_t get_hex_arg(const char *s);
 ////                                                                      ////
 //////////////////////////////////////////////////////////////////////////////
 
-rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **dict) {
+rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **srch) {
     size_t i;
     rtfobj *R = malloc(sizeof *R);
 
@@ -105,53 +105,56 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **dict) {
     R->fin = fin;
     R->fout = fout;
 
+    // 
+    R->fatalerr = 0;
+
     // Set up replacement dictionary
-    for (i=0; dict[i] != NULL; i++); 
-    R->dictz = i/2;
-    R->dict_max_keylen = 0UL;
-    R->dict_match = 0UL; 
+    for (i=0; srch[i] != NULL; i++); 
+    R->srchz = i/2;
+    R->srch_max_keylen = 0UL;
+    R->srch_match = 0UL; 
 
     // Allocate two lists of pointers
-    R->dict_key = malloc(R->dictz * sizeof *R->dict_key);
-    R->dict_val = malloc(R->dictz * sizeof *R->dict_val);
-    if ((!R->dict_key) || (!R->dict_val)) { 
+    R->srch_key = malloc(R->srchz * sizeof *R->srch_key);
+    R->srch_val = malloc(R->srchz * sizeof *R->srch_val);
+    if ((!R->srch_key) || (!R->srch_val)) { 
         delete_rtfobj(R);
-        LOG("Out of memory allocating key/value pointers!");
+        LOG("Out of memory allocating search key/value pointers!");
         return NULL; 
     }
 
     // Assign those pointers to the strings we were passed. Also track
     // which key has the longest length (to make comparisons more efficient).
-    for (i=0; i < R->dictz; i++) {
-        R->dict_key[i] = dict[2*i];
-        R->dict_val[i] = dict[2*i+1];
-        if (R->dict_max_keylen < strlen(R->dict_key[i])) {
-            R->dict_max_keylen = strlen(R->dict_key[i]);
+    for (i=0; i < R->srchz; i++) {
+        R->srch_key[i] = srch[2*i];
+        R->srch_val[i] = srch[2*i+1];
+        if (R->srch_max_keylen < strlen(R->srch_key[i])) {
+            R->srch_max_keylen = strlen(R->srch_key[i]);
         }
     }
 
     R->attr = NULL;
+
     R->ri = 0UL;
     R->rawz = RAW_BUFFER_SIZE;
-    memzero(R->raw, RAW_BUFFER_SIZE);
+    memzero(R->raw, R->rawz);
 
     R->ti = 0UL;
     R->txtz = TXT_BUFFER_SIZE;
-    memzero(R->txt, TXT_BUFFER_SIZE);
+    memzero(R->txt, R->txtz);
 
     R->ci = 0UL;
     R->cmdz = CMD_BUFFER_SIZE;
-    memzero(R->cmd, CMD_BUFFER_SIZE);
+    memzero(R->cmd, R->cmdz);
     
-    R->fatalerr = 0;
 
     return R;
 }
 
 void delete_rtfobj(rtfobj *R) {
     if (R) {
-        free(R->dict_key);
-        free(R->dict_val);
+        free(R->srch_key);
+        free(R->srch_val);
         while (R->attr) {
             pop_attr(R);
         }
@@ -250,16 +253,16 @@ static int pattern_match(rtfobj *R) {
     if (R->ri > 0 && R->ti == 0) return NOMATCH;
 
     // Check for complete matches
-    for (i = 0; i < R->dictz; i++) {
-        if (!strcmp(R->txt, R->dict_key[i])) {
-            R->dict_match = i;
+    for (i = 0; i < R->srchz; i++) {
+        if (!strcmp(R->txt, R->srch_key[i])) {
+            R->srch_match = i;
             return MATCH;
         }
     }
 
     // Check for partial matches at current offset
-    for (i = 0; i < R->dictz; i++) {
-        if (!strncmp(R->txt, R->dict_key[i], R->ti)) {
+    for (i = 0; i < R->srchz; i++) {
+        if (!strncmp(R->txt, R->srch_key[i], R->ti)) {
             return PARTIAL;
         }
     }
@@ -275,11 +278,14 @@ static int pattern_match(rtfobj *R) {
     //        invalidated).
     //
     //        Instead, we could iterate through and discover that 
-    //             strncmp(&R->txt[2], R->dict_key[?], R->ti-2)
+    //             strncmp(&R->txt[2], R->srch_key[?], R->ti-2)
     //
     //        However, unclear what to do then since we don't track what
     //        part of the text buffer corresponds to what part of the raw
     //        buffer. 
+
+    //        IDEA: COULD HAVE AN ARRAY OF SIZE_Ts THE SAME SIZE AS txt[]
+    //              THAT MAPS TO THE CORRESPONDING STARTING INDEX IN raw[]
 
     return NOMATCH;
 }
@@ -380,14 +386,14 @@ static void proc_command(rtfobj *R) {
     } 
 
     // COMMAND: SET THE UNICODE SKIP-BYTE COUNT
-    if (REGEX_MATCH(cmd, "^uc[0-9]*$")) {
+    if (REGEX_MATCH(cmd, "^uc[0-9]+$")) {
         R->attr->uc = (size_t)get_num_arg(cmd);
         R->attr->skippable = false;
         return;
     } 
 
     // COMMAND: UNICODE CODE POINT SPECIFICATION
-    if (REGEX_MATCH(cmd, "^u[0-9]*$")) {
+    if (REGEX_MATCH(cmd, "^u-?[0-9]+$")) {
         char utf8[5];
 
         encode_utf8(get_num_arg(cmd), utf8);
@@ -548,9 +554,9 @@ static void reset_cmd_buffer(rtfobj *R) {
 //////////////////////////////////////////////////////////////////////////////
 
 static void output_match(rtfobj *R) {
-    size_t len = strlen(R->dict_val[R->dict_match]);
+    size_t len = strlen(R->srch_val[R->srch_match]);
 
-    fwrite(R->dict_val[R->dict_match], 1, len, R->fout);
+    fwrite(R->srch_val[R->srch_match], 1, len, R->fout);
 
     // Output the same number of braces we had in our raw buffer
     // Otherwise, if the text matching our replacement key had a font change
@@ -631,14 +637,13 @@ static void push_attr(rtfobj *R) {
 static void pop_attr(rtfobj *R) {
     rtfattr *oldattr;
 
-    if (!R->attr) {
-        LOG("Attempt to pop non-existent attribute set off stack!");
-        LOG("Ignoring likely off-by-one error and hoping for the best");
-        return;
-    } else {
+    if (R->attr) {
         oldattr = R->attr;        // Point it at the current attribute set
         R->attr = oldattr->outer; // Modify structure to point to outer scope
         free(oldattr);            // Delete the old attribute set
+    } else {
+        DBUG("Attempt to pop non-existent attribute set off stack!");
+        LOG("Ignoring likely off-by-one error.");
     }
 }
 
@@ -657,23 +662,23 @@ static void pop_attr(rtfobj *R) {
 static void encode_utf8(int32_t c, char utf8[5]) {
     if (c < 0x80) {
         // (__ & 01111111)|00000000  ==> 0xxx xxxx
-        utf8[0] = (char)(c>>0  &  0x7F) | 0x00;  
+        utf8[0] = (char)(c>>0  &  0x7F) | (char)0x00;  
         utf8[1] = '\0';
     }
     else if (c < 0x0800) {
         // (__ & 00011111)|11000000  ==> 110x xxxx
         // (__ & 00111111)|10000000  ==> 10xx xxxx
-        utf8[0] = (char)(c>>6 & 0x1F) | 0xC0;
-        utf8[1] = (char)(c>>0 & 0x3F) | 0x80;
+        utf8[0] = (char)(c>>6 & 0x1F) | (char)0xC0;
+        utf8[1] = (char)(c>>0 & 0x3F) | (char)0x80;
         utf8[2] = '\0';
     }
     else if (c < 0x010000) {
         // (__ & 00001111)|11100000  ==> 1110 xxxx
         // (__ & 00111111)|10000000  ==> 10xx xxxx
         // (__ & 00111111)|10000000  ==> 10xx xxxx
-        utf8[0] = (char)(c>>12 &  0x0F) | 0xE0; 
-        utf8[1] = (char)(c>>6  &  0x3F) | 0x80;
-        utf8[2] = (char)(c>>0  &  0x3F) | 0x80;
+        utf8[0] = (char)(c>>12 &  0x0F) | (char)0xE0; 
+        utf8[1] = (char)(c>>6  &  0x3F) | (char)0x80;
+        utf8[2] = (char)(c>>0  &  0x3F) | (char)0x80;
         utf8[3] = '\0';
     }
     else if (c < 0x110000) {
@@ -681,10 +686,10 @@ static void encode_utf8(int32_t c, char utf8[5]) {
         // (__ & 00111111)|10000000  ==> 10xx xxxx
         // (__ & 00111111)|10000000  ==> 10xx xxxx
         // (__ & 00111111)|10000000  ==> 10xx xxxx
-        utf8[0] = (char)(c>>18 &  0x07) | 0xF0;
-        utf8[1] = (char)(c>>12 &  0x3F) | 0x80;
-        utf8[2] = (char)(c>>6  &  0x3F) | 0x80;
-        utf8[3] = (char)(c>>0  &  0x3F) | 0x80;
+        utf8[0] = (char)(c>>18 &  0x07) | (char)0xF0;
+        utf8[1] = (char)(c>>12 &  0x3F) | (char)0x80;
+        utf8[2] = (char)(c>>6  &  0x3F) | (char)0x80;
+        utf8[3] = (char)(c>>0  &  0x3F) | (char)0x80;
         utf8[4] = '\0';
     }
 }
@@ -699,28 +704,28 @@ static void memzero(void *const p, const size_t n) {
 
 
 static int32_t get_num_arg(const char *s) {
-    const char *valid="0123456789-";
+    const char *validchars="0123456789-";
     const char *p;
-    int32_t n;
+    int32_t retval;
 
     p = s;
-    while (!strchr(valid, *p)) p++;
+    while (!strchr(validchars, *p)) p++;
 
-    sscanf(p, "%"SCNd32, &n);
+    sscanf(p, "%"SCNd32, &retval);
 
-    return n;
+    return retval;
 }
 
 
 static int32_t get_hex_arg(const char *s) {
-    const char *valid="0123456789ABCDEFabcdef-";
+    const char *validchars="0123456789ABCDEFabcdef-";
     const char *p;
-    int32_t n;
+    int32_t retval;
 
     p = s;
-    while (!strchr(valid, *p)) p++;
+    while (!strchr(validchars, *p)) p++;
 
-    sscanf(p, "%"SCNx32, &n);
+    sscanf(p, "%"SCNx32, &retval);
 
-    return n;
+    return retval;
 }

@@ -19,53 +19,57 @@
 #define   MATCH                 1
 
 
-// STRUCTURE DEFINITIONS
+//STRUCTURE DEFINITIONS
+
+// TODO: font table entries
+// 
+// typedef struct ftentry {
+//     int64_t k;
+//     int64_t v;
+// } dictentry;
+// 
+// typedef struct font {
+//     int8_t  N;
+//     cpg_t   cpg;
+// } font;
+
+
+
 typedef struct rtfattr {
     size_t uc;
-    size_t skipbytes;
+    size_t skipbytes;   // WTF does this mean?
+    bool   skippable;   // WTF does this mean?
     cpg_t  cpg;
-    // Indicate which font
-    bool   skippable; 
+    // TODO: Indicate currently active fonttbl entry
 
     struct rtfattr *outer;
 } rtfattr;
 
 
-typedef struct font {
-    int8_t  N;
-    cpg_t   cpg;
-} font;
-
 
 typedef struct rtfobj {
     FILE         *  fin;          // RTF file-in
     FILE         *  fout;         // RTF file-out
-    
-    size_t          dictz;
-    size_t          dict_max_keylen;
-    size_t          dict_match; 
-    const char  **  dict_key;
-    const char  **  dict_val;
+
+    int             fatalerr;     // Cf. ERRNO
+
+    size_t          ri;           // raw/txt/cmd iterators, buffer
+    size_t          ti;           // sizes, and buffers
+    size_t          ci;
+    size_t          rawz;
+    size_t          txtz;
+    size_t          cmdz;
+    char            raw[RAW_BUFFER_SIZE];
+    char            txt[TXT_BUFFER_SIZE];
+    char            cmd[CMD_BUFFER_SIZE];
+
+    size_t          srchz;        // srch & replace pairs
+    size_t          srch_max_keylen;
+    size_t          srch_match; 
+    const char  **  srch_key;
+    const char  **  srch_val;
     
     rtfattr      *  attr;         // Attribute stack
-
-    size_t          ri;           // Raw processing iterator
-    size_t          rawz;         // Raw processing buffer size
-    char            raw[RAW_BUFFER_SIZE];  // Raw processing buffer
-    
-    size_t          ti;           // Text processing iterator
-    size_t          txtz;         // Text processing buffer size
-    char            txt[TXT_BUFFER_SIZE];  // Text processing buffer
-
-    size_t          ci;           // Command processing iterator
-    size_t          cmdz;         // Command processing buffer size
-    char            cmd[CMD_BUFFER_SIZE];  // Command processing buffer
-
-    int             fatalerr;     // Quick way to trigger exit of rtf 
-                                  // processing without taking down the whole
-                                  // program. 
-
-    // FONT TABLE
 } rtfobj;
 
 
@@ -73,7 +77,6 @@ typedef struct rtfobj {
 // FUNCTION DECLARATIONS
 rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **replacements);
 void    delete_rtfobj(rtfobj *R);
-
 void    rtfreplace(rtfobj *R);
 
 

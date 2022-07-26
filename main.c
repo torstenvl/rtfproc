@@ -5,8 +5,8 @@
 #include "rtfsed.h"
 #include "STATIC/cpgtou.h"
 
-#define FILENAME       "DOCS/test.rtf"
-#define OUTPUTFILENAME "DOCS/new.rtf"
+#define FILENAME       "TEST/rtfprocess-input.rtf"
+#define OUTPUTFILENAME "TEST/rtfprocess-output.rtf"
 
 
 
@@ -42,7 +42,7 @@ int main(void) {
     fclose(fin);
     fclose(fout);
 
-    system("open DOCS/new.rtf");
+    // system("open TEST/rtfprocess-output.rtf");
 
     exit(EXIT_SUCCESS);
 }
