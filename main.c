@@ -5,17 +5,8 @@
 #include "rtfsed.h"
 #include "STATIC/cpgtou.h"
 
-#define FILENAME       "TEST/rtfprocess-input.rtf"
-#define OUTPUTFILENAME "TEST/rtfprocess-output.rtf"
-
-
-
-
 int main(void) {
-    FILE *fin  = NULL;
-    FILE *fout = NULL;
     rtfobj *R;
-
 
     const char *replacements[] = {
         "«SSIC»",                    "1000",
@@ -32,17 +23,9 @@ int main(void) {
         NULL 
     };
 
-    fin  = fopen(FILENAME, "rb");         assert(fin);
-    fout = fopen(OUTPUTFILENAME, "wb");   assert(fout);
-
-    R = new_rtfobj(fin, fout, replacements);
+    R = new_rtfobj(stdin, stdout, replacements);
     rtfreplace(R);
     delete_rtfobj(R);
-
-    fclose(fin);
-    fclose(fout);
-
-    // system("open TEST/rtfprocess-output.rtf");
 
     exit(EXIT_SUCCESS);
 }
