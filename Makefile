@@ -11,11 +11,11 @@ TESTOUTPUT=TEST/rtfprocess-output.rtf
 
 CC = cc
 
-RELEASE = -std=c2x -Oz
-DEBUG = -std=c2x -O0 -gfull
-STRICT = -W -Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wreturn-type -Wcast-qual -Wswitch -Wshadow -Wcast-align -Wwrite-strings -Wmisleading-indentation
-SUPERSTRICT = -Wunused-parameter -Wchar-subscripts -Winline -Wnested-externs -Wredundant-decls
-ULTRASTRICT = -Weverything -Wno-padded -Wno-poison-system-directories -Wno-unused-function
+RELFLAGS = -std=c2x -Oz
+DBGFLAGS = -std=c2x -O0 -gfull
+STRFLAGS = -W -Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wreturn-type -Wcast-qual -Wswitch -Wshadow -Wcast-align -Wwrite-strings -Wmisleading-indentation
+XSTRFLAGS = -Wunused-parameter -Wchar-subscripts -Winline -Wnested-externs -Wredundant-decls
+XXSTRFLAGS = -Weverything -Wno-padded -Wno-poison-system-directories -Wno-unused-function
 
 
 .PHONY: all
@@ -23,24 +23,24 @@ all: superstrict
 
 .PHONY: release
 release: $(SRC) $(HDR)
-	$(CC) $(RELEASEFLAGS) $(SRC) -o $(EXE)
+	$(CC) $(RELFLAGS) $(SRC) -o $(EXE)
 	strip $(EXE)
 
 .PHONY: debug
 debug: $(SRC) $(HDR)
-	$(CC) $(DEBUGFLAGS) $(SRC) -o $(EXE)
+	$(CC) $(DBGFLAGS) $(SRC) -o $(EXE)
 
 .PHONY: semistrict
 semistrict: $(SRC) $(HDR)
-	$(CC) $(STRFLAGS) $(DEBUGFLAGS) $(SRC) -o $(EXE)
+	$(CC) $(STRFLAGS) $(DBGFLAGS) $(SRC) -o $(EXE)
 
 .PHONY: strict
 strict: $(SRC) $(HDR)
-	$(CC) $(STRFLAGS) $(SUPSTRFLAGS) $(DEBUGFLAGS) $(SRC) -o $(EXE)
+	$(CC) $(STRFLAGS) $(XSTRFLAGS) $(DBGFLAGS) $(SRC) -o $(EXE)
 
 .PHONY: superstrict
 superstrict: $(SRC) $(HDR)
-	$(CC) $(STRFLAGS) $(SUPSTRFLAGS) $(ULTSTRFLAGS) $(DEBUGFLAGS) $(SRC) -o $(EXE)
+	$(CC) $(STRFLAGS) $(XSTRFLAGS) $(XXSTRFLAGS) $(DBGFLAGS) $(SRC) -o $(EXE)
 
 .PHONY: test
 test: testprologue testsuite testepilogue
@@ -60,14 +60,11 @@ testsuite: testrtfprocess
 
 .PHONY: testrtfprocess
 testrtfprocess:
-	@$(CC) $(STRFLAGS) $(SUPSTRFLAGS) $(ULTSTRFLAGS) $(DEBUGFLAGS) $(SRC) -o $(EXE)
+	@$(CC) $(STRFLAGS) $(XSTRFLAGS) $(XXSTRFLAGS) $(DBGFLAGS) $(SRC) -o $(EXE)
 	@printf "Testing rtfprocess... "
-	@./rtfsed
+	@./rtfsed < TEST/rtfprocess-input.rtf > TEST/rtfprocess-output.rtf
 	@diff TEST/rtfprocess-output.rtf TEST/rtfprocess-correct.rtf > /dev/null \
-		&& printf $(SUCC) \
-		|| printf $(FAIL)
-	@rm TEST/rtfprocess-output.rtf
-
+		&& printf $(SUCC) || printf $(FAIL)
 
 .PHONY: clean
 clean:
