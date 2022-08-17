@@ -37,8 +37,8 @@
 
 typedef struct rtfattr {
     size_t uc;
-    size_t skipbytes;   // WTF does this mean?
-    bool   skippable;   // WTF does this mean?
+    size_t skipbytes;   // Iterator from uc to 0 after encountering \u
+    bool   skippable;   // Marks a block as ignorable after \*
     cpg_t  cpg;
     // TODO: Indicate currently active fonttbl entry
 
