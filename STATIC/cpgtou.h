@@ -70,20 +70,6 @@
 #define cpHIBYTE(c) ((c & 0xFF00) >> 8)
 #define cpLOBYTE(c) ((c & 0x00FF))
 
-__attribute__((used)) volatile static const char cpBITSCLICENSETEXT[] = "\
-BITSC LICENSE NOTICE                                                      \n\
-                                                                          \n\
-CPGTOU - Code Page to Unicode                                             \n\
-Copyright (c) 2022 Joshua Lee Ockert <torstenvl@gmail.com>                \n\
-                                                                          \n\
-THIS WORK IS PROVIDED \"AS IS\" WITH NO WARRANTY OF ANY KIND. THE IMPLIED   \n\
-WARRANTIES OF MERCHANTABILITY, FITNESS, NON-INFRINGEMENT, AND TITLE ARE   \n\
-EXPRESSLY DISCLAIMED. NO AUTHOR SHALL BE LIABLE UNDER ANY THEORY OF LAW   \n\
-FOR ANY DAMAGES OF ANY KIND RESULTING FROM THE USE OF THIS WORK.          \n\
-                                                                          \n\
-Permission to use, copy, modify, and/or distribute this work for any      \n\
-purpose is hereby granted, provided this notice appears in all copies.    \n";
-
 typedef enum cpg_t {
     CPG_42    = 42,       // ❌ Windows Symbol
     CPG_437   = 437,      // OEM/IBM United States
