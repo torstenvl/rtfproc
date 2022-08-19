@@ -21,6 +21,33 @@
 
 
 
+// NOTES
+// {\fonttbl\f0\fmodern\fcharset0 Courier;}
+// {\fonttbl
+// {\f0\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
+// {\f37\fbidi \fswiss\fcharset0\fprq2{\*\panose 020f0502020204030204}Calibri;}
+// {\flomajor\f31500\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
+// {\fdbmajor\f31501\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
+// {\fhimajor\f31502\fbidi \fswiss\fcharset0\fprq2{\*\panose 020f0302020204030204}Calibri Light;}
+// {\fbimajor\f31503\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
+// {\flominor\f31504\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
+// {\fdbminor\f31505\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
+// {\fhiminor\f31506\fbidi \fswiss\fcharset0\fprq2{\*\panose 020f0502020204030204}Calibri;}
+// {\fbiminor\f31507\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
+// {\f42\fbidi \froman\fcharset238\fprq2 Times New Roman CE;}
+
+// {\flomajor\f31514\fbidi \froman\fcharset178\fprq2 Times New Roman (Arabic);}
+// {\fdbmajor\f31524\fbidi \froman\fcharset178\fprq2 Times New Roman (Arabic);}
+// {\fhimajor\f31534\fbidi \fswiss\fcharset178\fprq2 Calibri Light (Arabic);}
+// {\fbimajor\f31544\fbidi \froman\fcharset178\fprq2 Times New Roman (Arabic);}
+// {\flominor\f31554\fbidi \froman\fcharset178\fprq2 Times New Roman (Arabic);}
+// {\fdbminor\f31564\fbidi \froman\fcharset178\fprq2 Times New Roman (Arabic);}
+// {\fhiminor\f31574\fbidi \fswiss\fcharset178\fprq2 Calibri (Arabic);}
+// {\fbiminor\f31584\fbidi \froman\fcharset178\fprq2 Times New Roman (Arabic);}
+// }
+
+
+
 
 
 //////////////////////////////////////////////////////////////////////////////
@@ -123,8 +150,7 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **srch) {
         return NULL; 
     }
 
-    // Assign those pointers to the strings we were passed. Also track
-    // which key has the longest length (to make comparisons more efficient).
+    // Assign those pointers to the strings we were passed. 
     for (i=0; i < R->srchz; i++) {
         R->srch_key[i] = srch[2*i];
         R->srch_val[i] = srch[2*i+1];
@@ -420,10 +446,28 @@ static void proc_command(rtfobj *R) {
         return;
     } 
 
+    // COMMAND: DEFINE A FONT TABLE
+    if (REGEX_MATCH(cmd, "fonttbl$")) {
+        output_raw(R);
+        reset_buffers(R);
+
+        for (int braces = 1, clast = 0, c = 0; braces > 0; ) {
+            c = fgetc(R->fin);
+            if (c == EOF) { R->fatalerr = EIO; return; }
+            if (c == '{' && clast != '\\') braces++;
+            if (c == '}' && clast != '\\') braces--;
+
+            // Should we be using a subselection buffer instead?
+
+            fputc(c, R->fout);
+            clast = c;
+        }
+    } 
+
+
     // COMMAND CATEGORY: ALL THE SKIPPABLE STUFF I DON'T CARE ABOUT WITH 
     // WEIRD PARAMETER DATA THAT WILL MESS UP MY TEXT-MATCHING
     if (
-    (REGEX_MATCH(cmd, "fonttbl$"))     ||
     (REGEX_MATCH(cmd, "pict$"))        ||
     (REGEX_MATCH(cmd, "colortbl$"))    ||
     (REGEX_MATCH(cmd, "stylesheet$"))  ||
@@ -463,7 +507,7 @@ static void proc_command(rtfobj *R) {
 //////////////////////////////////////////////////////////////////////////////
 
 static void add_to_txt(int c, rtfobj *R) {
-    if (!(R->ti < R->txtz - 1)) {
+    if (R->ti+1 >= R->txtz) {
         LOG("Exhausted txt buffer.");
         LOG("R->ti = %zu. Last txt data: \'%s\'", R->ti, &R->txt[R->ti-80]);
         LOG("No match within limits. Flushing buffers, attempting recovery");
@@ -479,9 +523,7 @@ static void add_to_txt(int c, rtfobj *R) {
 
 
 static void add_string_to_txt(const char *s, rtfobj *R) {
-    size_t len = strlen(s);
-
-    if (!(R->ti < R->txtz - len)) {
+    if (R->ti+strlen(s) >= R->txtz) {
         LOG("Exhausted txt buffer.");
         LOG("R->ti = %zu. Last txt data: \'%s\'", R->ti, &R->txt[R->ti-80]);
         LOG("No match within limits. Flushing buffers, attempting recovery");
@@ -489,12 +531,12 @@ static void add_string_to_txt(const char *s, rtfobj *R) {
         reset_buffers(R);
     }
 
-    while (*s) R->txt[R->ti++] = *s++;
+    while (*s) add_to_txt((int)(*s++), R);
 }
 
 
 static void add_to_cmd(int c, rtfobj *R) {
-    if (!(R->ci < R->cmdz - 1)) {
+    if (R->ci+1 >= R->cmdz) {
         LOG("Exhausted cmd buffer.");
         LOG("R->ci = %zu. Last cmd data: \'%s\'", R->ci, &R->cmd[R->ci-80]);
         LOG("No match within limits. Flushing buffers, attempting recovery");
@@ -506,7 +548,7 @@ static void add_to_cmd(int c, rtfobj *R) {
 
 
 static void add_to_raw(int c, rtfobj *R) {
-    if (!(R->ri < R->rawz - 1)) {
+    if (R->ri+1 >= R->rawz) {
         LOG("Exhausted raw buffer.");
         LOG("R->ri = %zu. Last raw data: \'%s\'", R->ri, &R->raw[R->ri-80]);
         LOG("No match within limits. Flushing buffers, attempting recovery");
@@ -581,16 +623,12 @@ static void output_raw(rtfobj *R) {
 
 
 static void skip_thru_block(rtfobj *R) {
-    int braces = 1;
-    int c;
-    int clast = '\0';
-    
     output_raw(R);
     reset_buffers(R);
-
-    while (braces != 0) {
+    
+    for (int braces = 1, clast = 0, c = 0; braces > 0; ) {
         c = fgetc(R->fin);
-        assert(c != EOF);
+        if (c == EOF) { R->fatalerr = EIO; return; }
         if (c == '{' && clast != '\\') braces++;
         if (c == '}' && clast != '\\') braces--;
         fputc(c, R->fout);
@@ -622,8 +660,8 @@ static void push_attr(rtfobj *R) {
     if (R->attr == NULL) {
         newattr->uc = 0;
         newattr->skipbytes = 0;
-        newattr->cpg = CPG_1252;
         newattr->skippable = false;
+        newattr->cpg = CPG_1252;
         newattr->outer = NULL;
         R->attr = newattr;
     } else {
@@ -643,7 +681,7 @@ static void pop_attr(rtfobj *R) {
         free(oldattr);            // Delete the old attribute set
     } else {
         DBUG("Attempt to pop non-existent attribute set off stack!");
-        LOG("Ignoring likely off-by-one error.");
+        DBUG("Ignoring likely off-by-one error.");
     }
 }
 
