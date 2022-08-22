@@ -37,8 +37,9 @@
 
 typedef struct rtfattr {
     size_t uc;
-    size_t skipbytes;   // Iterator from uc to 0 after encountering \u
-    bool   skippable;   // Marks a block as ignorable after \*
+    size_t uc0i;        // Iterator from uc to 0 after encountering \u
+    bool   ignorable;   // Marks a block as possibly ignorable after \*
+    bool   ignore;      // Marks a block as ignored after \* or otherwise
     cpg_t  cpg;
     // TODO: Indicate currently active fonttbl entry
 
@@ -51,7 +52,7 @@ typedef struct rtfobj {
     FILE         *  fin;          // RTF file-in
     FILE         *  fout;         // RTF file-out
 
-    int             fatalerr;     // Cf. ERRNO
+    int             fatalerr;     // Cf. ERRNO. E.g., EIO, ENOMEM, etc.
 
     size_t          ri;           // raw/txt/cmd iterators, buffer
     size_t          ti;           // sizes, and buffers

@@ -61,7 +61,6 @@
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
-#include <assert.h>
 #include "rtfsed.h"
 #include "STATIC/re.h"
 #include "STATIC/cpgtou.h"
@@ -69,9 +68,19 @@
 // Internal function declarations
 static void dispatch_scope(int c, rtfobj *R);
 static void dispatch_text(int c, rtfobj *R);
-static void dispatch_command(int c, rtfobj *R);
-static void read_command(int c, rtfobj *R);
+static void dispatch_command(rtfobj *R);
+static void read_command(rtfobj *R);
 static void proc_command(rtfobj *R);
+static void proc_cmd_escapedliteral(rtfobj *R);
+static void proc_cmd_asterisk(rtfobj *R);
+static void proc_cmd_uc(rtfobj *R);
+static void proc_cmd_u(rtfobj *R);
+static void proc_cmd_apostrophe(rtfobj *R);
+static void proc_cmd_fonttbl(rtfobj *R);
+static void proc_cmd_ignoreblock(rtfobj *R);
+static void proc_cmd_newpar(rtfobj *R);
+static void proc_cmd_newline(rtfobj *R);
+static void proc_cmd_unknown(rtfobj *R);
 static void push_attr(rtfobj *R);
 static void pop_attr(rtfobj *R);
 static int  pattern_match(rtfobj *R);
@@ -206,9 +215,10 @@ void rtfreplace(rtfobj *R) {
         switch (c) {
             case '{':           dispatch_scope(c, R);      break;
             case '}':           dispatch_scope(c, R);      break;
-            case '\\':          dispatch_command(c, R);    break;
+            case '\\':          dispatch_command(R);       break;
             default:            dispatch_text(c, R);       break;
         }
+
         if (R->fatalerr)  {  LOG("Encountered a fatal error");  return;  }
 
         switch (pattern_match(R)) {
@@ -216,6 +226,7 @@ void rtfreplace(rtfobj *R) {
             case MATCH:          output_match(R);          break;
             case NOMATCH:        output_raw(R);            break;
         }
+        
         if (R->fatalerr)  {  LOG("Encountered a fatal error");  return;  }
     }
 
@@ -235,14 +246,15 @@ void rtfreplace(rtfobj *R) {
 //////////////////////////////////////////////////////////////////////////////
 
 static void dispatch_scope(int c, rtfobj *R) {
-    R->raw[R->ri++] = (char)c;
+    add_to_raw(c, R);
     if      (c == '{')  push_attr(R);
     else if (c == '}')  pop_attr(R);
 }
 
 
-static void dispatch_command(int c, rtfobj *R) {
-    read_command(c, R);
+static void dispatch_command(rtfobj *R) {
+    add_to_raw('\\', R);
+    read_command(R);
     proc_command(R);
 }
 
@@ -255,7 +267,7 @@ static void dispatch_text(int c, rtfobj *R) {
     else if (c == '\r') {     add_to_raw(c, R);                              } 
     else if (c == '\t') {     add_to_raw(c, R);      add_to_txt(' ', R);     }
     else if (c == '\v') {     add_to_raw(c, R);      add_to_txt(' ', R);     }
-    else {                    add_to_raw(c, R);      add_to_txt( c,  R);     }
+    else {                    add_to_raw(c, R);      add_to_txt(c, R);       }
 }
 
 
@@ -329,21 +341,17 @@ static int pattern_match(rtfobj *R) {
 ////                                                                      ////
 //////////////////////////////////////////////////////////////////////////////
 
-static void read_command(int c, rtfobj *R) {
-    R->ci = 0UL;
-    memzero(R->cmd, R->cmdz);
+static void read_command(rtfobj *R) {
+    int c;
 
-    add_to_cmd(c, R);
-    add_to_raw(c, R);
-    assert((c = fgetc(R->fin)) != EOF);
+    reset_cmd_buffer(R);
+
+    if ((c=fgetc(R->fin)) == EOF) { LOG("Unexpected EOF"); R->fatalerr = EIO; return; }
 
     switch (c) {
         case '{':  // Escaped literal
         case '}':  // Escaped literal
         case '\\': // Escaped literal
-            add_to_cmd(c, R);
-            add_to_raw(c, R);
-            break;
         case '*':  // Special one-character command
             add_to_cmd(c, R);
             add_to_raw(c, R);
@@ -363,139 +371,128 @@ static void read_command(int c, rtfobj *R) {
         case '\'':
             add_to_cmd(c, R);
             add_to_raw(c, R);
-            // Attempt to get two hex digits
-            c = fgetc(R->fin);
-            if (c==EOF) { LOG("Unexpected EOF"); R->fatalerr = EIO; break; }
-            add_to_cmd(c, R);
-            add_to_raw(c, R);
-            c = fgetc(R->fin);
-            if (c==EOF) { LOG("Unexpected EOF"); R->fatalerr = EIO; break; }
-            add_to_cmd(c, R);
-            add_to_raw(c, R);
-            break;
-        default:
-            if (!isalnum(c)) { LOG("Invalid command format..."); break; }
+
+            if ((c=fgetc(R->fin)) == EOF) { LOG("Unexpected EOF"); R->fatalerr = EIO; break; }
             add_to_cmd(c, R);
             add_to_raw(c, R);
 
+            if ((c=fgetc(R->fin)) == EOF) { LOG("Unexpected EOF"); R->fatalerr = EIO; break; }
+            add_to_cmd(c, R);
+            add_to_raw(c, R);
+
+            break;
+        default:
+            if (!isalnum(c)) { LOG("Invalid command format..."); R->fatalerr = EINVAL; break; }
+            add_to_cmd(c, R);
+            add_to_raw(c, R);
+
+            // Greedily add input bytes to command buffer, so long as they're valid
             while(isalnum(c = fgetc(R->fin))) {
                 add_to_cmd(c, R);
                 add_to_raw(c, R);
             }
 
-            if (c==EOF) { LOG("Unexpected EOF"); R->fatalerr = EIO; break; }
-
-            if (isspace(c)) {     add_to_raw(c, R);      }
-            else {                ungetc(c, R->fin);     }
+            // Stopped getting valid command bytes. What now? Depends on if it's an EOF 
+            // or a space or something else. "Something else" is probably a backslash
+            // for the next command, so we need to put it back on the input stream.
+            if (isspace(c))     add_to_raw(c, R);
+            else if (c == EOF)  LOG("Unexpected EOF") && (R->fatalerr = EIO);
+            else                ungetc(c, R->fin);
             break;
     }
 }
 
 
 static void proc_command(rtfobj *R) {
-    char *cmd = &R->cmd[1];
-
-    // COMMAND CATEGORY: ESCAPED CHARACTER LITERALS
-    if (
-    (STRING_MATCH(cmd, "\\"))  ||
-    (STRING_MATCH(cmd, "{"))   ||
-    (STRING_MATCH(cmd, "}"))   ){
-        add_to_txt(cmd[0], R);
-        R->attr->skippable = false;
-        return;
-    } 
-
-    // COMMAND: MARK NEXT COMMAND AS OPTIONAL
-    if (STRING_MATCH(cmd, "*")) {
-        R->attr->skippable = true;
-        return;
-    } 
-
-    // COMMAND: SET THE UNICODE SKIP-BYTE COUNT
-    if (REGEX_MATCH(cmd, "^uc[0-9]+$")) {
-        R->attr->uc = (size_t)get_num_arg(cmd);
-        R->attr->skippable = false;
-        return;
-    } 
-
-    // COMMAND: UNICODE CODE POINT SPECIFICATION
-    if (REGEX_MATCH(cmd, "^u-?[0-9]+$")) {
-        char utf8[5];
-
-        encode_utf8(get_num_arg(cmd), utf8);
-        add_string_to_txt(utf8, R);
-        R->attr->skipbytes = R->attr->uc;
-
-        R->attr->skippable = false;
-        return;
-    } 
-    
-    // COMMAND: CODE PAGE CODE POINT SPECIFICATION
-    if (REGEX_MATCH(cmd, "^\'[0-9A-Fa-f][0-9A-Fa-f]$")) {
-        char utf8[5];
-        
-        if (R->attr->skipbytes) {
-            R->attr->skipbytes--;
-        } else {
-            // TODO: CONVERT FROM CODE PAGE TO UNICODE
-            encode_utf8(get_hex_arg(cmd), utf8);
-            add_string_to_txt(utf8, R);
-        }
-
-        R->attr->skippable = false;
-        return;
-    } 
-
-    // COMMAND: DEFINE A FONT TABLE
-    if (REGEX_MATCH(cmd, "fonttbl$")) {
-        output_raw(R);
-        reset_buffers(R);
-
-        for (int braces = 1, clast = 0, c = 0; braces > 0; ) {
-            c = fgetc(R->fin);
-            if (c == EOF) { R->fatalerr = EIO; return; }
-            if (c == '{' && clast != '\\') braces++;
-            if (c == '}' && clast != '\\') braces--;
-
-            // Should we be using a subselection buffer instead?
-
-            fputc(c, R->fout);
-            clast = c;
-        }
-    } 
-
-
-    // COMMAND CATEGORY: ALL THE SKIPPABLE STUFF I DON'T CARE ABOUT WITH 
-    // WEIRD PARAMETER DATA THAT WILL MESS UP MY TEXT-MATCHING
-    if (
-    (REGEX_MATCH(cmd, "pict$"))        ||
-    (REGEX_MATCH(cmd, "colortbl$"))    ||
-    (REGEX_MATCH(cmd, "stylesheet$"))  ||
-    (REGEX_MATCH(cmd, "operator$"))    ){
-        skip_thru_block(R);
-        R->attr->skippable = false;
-        return;
-    } 
-
-    // COMMAND CATEGORY: LINE/PARAGRAPH BREAKS
-    if (
-    (REGEX_MATCH(cmd, "line$"))  ||
-    (REGEX_MATCH(cmd, "par$"))   ||
-    (REGEX_MATCH(cmd, "pard$"))  ){
-        add_to_txt('\n', R);
-        R->attr->skippable = false;
-        return;
-    } 
-
-    // UNKNOWN COMMANDS
-    else {
-        if (R->attr->skippable) {
-            skip_thru_block(R);
-            R->attr->skippable = false;
-        }
-    }
+    if (0); 
+    else if (STRING_MATCH(R->cmd, "\\"))                        proc_cmd_escapedliteral(R);
+    else if (STRING_MATCH(R->cmd, "{"))                         proc_cmd_escapedliteral(R);
+    else if (STRING_MATCH(R->cmd, "}"))                         proc_cmd_escapedliteral(R);
+    else if (STRING_MATCH(R->cmd, "*"))                         proc_cmd_asterisk(R);
+    else if (REGEX_MATCH(R->cmd, "^uc[0-9]+$"))                 proc_cmd_uc(R);
+    else if (REGEX_MATCH(R->cmd, "^u-?[0-9]+$"))                proc_cmd_u(R);
+    else if (REGEX_MATCH(R->cmd, "^\'[0-9A-Fa-f][0-9A-Fa-f]$")) proc_cmd_apostrophe(R);
+    else if (REGEX_MATCH(R->cmd, "^fonttbl$"))                  proc_cmd_fonttbl(R);
+    else if (REGEX_MATCH(R->cmd, "^pict$"))                     proc_cmd_ignoreblock(R);
+    else if (REGEX_MATCH(R->cmd, "^colortbl$"))                 proc_cmd_ignoreblock(R);
+    else if (REGEX_MATCH(R->cmd, "^stylesheet$"))               proc_cmd_ignoreblock(R);
+    else if (REGEX_MATCH(R->cmd, "^operator$"))                 proc_cmd_ignoreblock(R);
+    else if (REGEX_MATCH(R->cmd, "^bin$"))                      proc_cmd_ignoreblock(R);
+    else if (REGEX_MATCH(R->cmd, "^par$"))                      proc_cmd_newpar(R);
+    else if (REGEX_MATCH(R->cmd, "^line$"))                     proc_cmd_newline(R);
+    else if (1)                                                 proc_cmd_unknown(R);
 }
 
+static void proc_cmd_escapedliteral(rtfobj *R) {
+    add_to_txt(R->cmd[0], R);
+    R->attr->ignorable = false;
+}
+
+static void proc_cmd_asterisk(rtfobj *R) {
+    R->attr->ignorable = true;
+}
+
+static void proc_cmd_uc(rtfobj *R) {
+    R->attr->uc = (size_t)get_num_arg(R->cmd);
+    R->attr->ignorable = false;
+}
+
+static void proc_cmd_u(rtfobj *R) {
+    char utf8[5];
+    encode_utf8(get_num_arg(R->cmd), utf8);
+    add_string_to_txt(utf8, R);
+    R->attr->uc0i = R->attr->uc;
+    R->attr->ignorable = false;
+}
+
+static void proc_cmd_apostrophe(rtfobj *R) {
+    char utf8[5];
+    if (R->attr->uc0i) {
+        R->attr->uc0i--;
+    } else {
+        // TODO: CONVERT FROM CODE PAGE TO UNICODE
+        encode_utf8(get_hex_arg(R->cmd), utf8);
+        add_string_to_txt(utf8, R);
+    }
+    R->attr->ignorable = false;
+}
+
+static void proc_cmd_fonttbl(rtfobj *R) {
+    output_raw(R);
+    reset_buffers(R);    
+    for (int braces = 1, clast = 0, c = 0; braces > 0; ) {
+        c = fgetc(R->fin);
+        if (c == EOF) { R->fatalerr = EIO; return; }
+        if (c == '{' && clast != '\\') braces++;
+        if (c == '}' && clast != '\\') braces--;
+        fputc(c, R->fout);
+        clast = c;
+    }
+    R->attr->ignorable = false;
+}
+
+static void proc_cmd_ignoreblock(rtfobj *R) {
+    skip_thru_block(R);
+    R->attr->ignorable = false;
+}
+
+static void proc_cmd_newpar(rtfobj *R) {
+    add_to_txt('\n', R);
+    add_to_txt('\n', R);
+    R->attr->ignorable = false;
+}
+
+static void proc_cmd_newline(rtfobj *R) {
+    add_to_txt('\n', R);
+    R->attr->ignorable = false;
+}
+
+static void proc_cmd_unknown(rtfobj *R) {
+    if (R->attr->ignorable) {
+        skip_thru_block(R);
+        R->attr->ignorable = false;
+    }
+}
 
 
 
@@ -514,8 +511,8 @@ static void add_to_txt(int c, rtfobj *R) {
         output_raw(R);
         reset_buffers(R);
     }
-    if (R->attr->skipbytes) {
-        R->attr->skipbytes--;
+    if (R->attr->uc0i) {
+        R->attr->uc0i--;
     } else {
         R->txt[R->ti++] = (char)c;
     }
@@ -659,8 +656,8 @@ static void push_attr(rtfobj *R) {
 
     if (R->attr == NULL) {
         newattr->uc = 0;
-        newattr->skipbytes = 0;
-        newattr->skippable = false;
+        newattr->uc0i = 0;
+        newattr->ignorable = false;
         newattr->cpg = CPG_1252;
         newattr->outer = NULL;
         R->attr = newattr;
