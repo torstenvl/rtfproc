@@ -15,8 +15,25 @@
 //   - Normalize replacement tokens as well as any Unicode in the text before
 //     comparison.  Use NFC (or maybe NFD?) normalization.
 //   
-//   - Add additional areas where we skip blocks for large data types.  This
-//     should, at a minimum, include \binN
+//   - Add support for late partial matches. Example:
+//             "ATTORNEY" => "Mr. Smith"
+//             "TORTLOCATION" => "December 12, 2021"
+//          Text has 
+//             "THEY CONVENED ATTORTLOCATION..." [sic]
+//          Current design would fail to replace TORTLOCATION because
+//          the entirety of the raw buffer corresponding to "ATTORT" would
+//          be discarded (since the partial match for ATTORNEY was
+//          invalidated).
+//
+//          Instead, we could iterate through and discover that 
+//             strncmp(&R->txt[2], R->srch_key[?], R->ti-2)
+//
+//          However, unclear what to do then since we don't track what
+//          part of the text buffer corresponds to what part of the raw
+//          buffer. 
+//  
+//          IDEA: COULD HAVE AN ARRAY OF SIZE_Ts THE SAME SIZE AS txt[]
+//              THAT MAPS TO THE CORRESPONDING STARTING INDEX IN raw[]
 // ---------------------------------------------------------------------------- 
 
 
@@ -141,16 +158,23 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **srch) {
     R->fin = fin;
     R->fout = fout;
 
-    // 
     R->fatalerr = 0;
+
+    R->ri = 0UL;
+    R->ti = 0UL;
+    R->ci = 0UL;
+    R->rawz = RAW_BUFFER_SIZE;
+    R->txtz = TXT_BUFFER_SIZE;
+    R->cmdz = CMD_BUFFER_SIZE;
+    memzero(R->raw, R->rawz);
+    memzero(R->txt, R->txtz);
+    memzero(R->cmd, R->cmdz);
 
     // Set up replacement dictionary
     for (i=0; srch[i] != NULL; i++); 
     R->srchz = i/2;
     R->srch_max_keylen = 0UL;
     R->srch_match = 0UL; 
-
-    // Allocate two lists of pointers
     R->srch_key = malloc(R->srchz * sizeof *R->srch_key);
     R->srch_val = malloc(R->srchz * sizeof *R->srch_val);
     if ((!R->srch_key) || (!R->srch_val)) { 
@@ -158,8 +182,6 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **srch) {
         LOG("Out of memory allocating search key/value pointers!");
         return NULL; 
     }
-
-    // Assign those pointers to the strings we were passed. 
     for (i=0; i < R->srchz; i++) {
         R->srch_key[i] = srch[2*i];
         R->srch_val[i] = srch[2*i+1];
@@ -169,19 +191,6 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **srch) {
     }
 
     R->attr = NULL;
-
-    R->ri = 0UL;
-    R->rawz = RAW_BUFFER_SIZE;
-    memzero(R->raw, R->rawz);
-
-    R->ti = 0UL;
-    R->txtz = TXT_BUFFER_SIZE;
-    memzero(R->txt, R->txtz);
-
-    R->ci = 0UL;
-    R->cmdz = CMD_BUFFER_SIZE;
-    memzero(R->cmd, R->cmdz);
-    
 
     return R;
 }
@@ -254,8 +263,10 @@ static void dispatch_scope(int c, rtfobj *R) {
 
 static void dispatch_command(rtfobj *R) {
     add_to_raw('\\', R);
-    read_command(R);
-    proc_command(R);
+    if (!(R->attr && R->attr->shunted)) {
+        read_command(R);
+        proc_command(R);
+    }
 }
 
 
@@ -263,11 +274,12 @@ static void dispatch_text(int c, rtfobj *R) {
     // Ignore newlines and carriage returns in RTF code. Consider tabs and
     // vertical tabs to be interchangeable with spaces. Treat everything else
     // literally. 
-    if      (c == '\n') {     add_to_raw(c, R);                              }
-    else if (c == '\r') {     add_to_raw(c, R);                              } 
-    else if (c == '\t') {     add_to_raw(c, R);      add_to_txt(' ', R);     }
-    else if (c == '\v') {     add_to_raw(c, R);      add_to_txt(' ', R);     }
-    else {                    add_to_raw(c, R);      add_to_txt(c, R);       }
+    if (R->attr && R->attr->shunted) {                add_to_raw(c, R);     }
+    else if (c == '\n') {                             add_to_raw(c, R);     }
+    else if (c == '\r') {                             add_to_raw(c, R);     } 
+    else if (c == '\t') {     add_to_txt(' ', R);     add_to_raw(c, R);     }
+    else if (c == '\v') {     add_to_txt(' ', R);     add_to_raw(c, R);     }
+    else {                    add_to_txt(c, R);       add_to_raw(c, R);     }
 }
 
 
@@ -304,26 +316,6 @@ static int pattern_match(rtfobj *R) {
             return PARTIAL;
         }
     }
-
-    // TODO:  Deal with late partial matches. Example:
-    //             "ATTORNEY" => "Mr. Smith"
-    //             "TORTLOCATION" => "December 12, 2021"
-    //        Text has 
-    //             "THEY CONVENED ATTORTLOCATION..." [sic]
-    //        Current design would fail to replace TORTLOCATION because
-    //        the entirety of the raw buffer corresponding to "ATTORT" would
-    //        be discarded (since the partial match for ATTORNEY was
-    //        invalidated).
-    //
-    //        Instead, we could iterate through and discover that 
-    //             strncmp(&R->txt[2], R->srch_key[?], R->ti-2)
-    //
-    //        However, unclear what to do then since we don't track what
-    //        part of the text buffer corresponds to what part of the raw
-    //        buffer. 
-
-    //        IDEA: COULD HAVE AN ARRAY OF SIZE_Ts THE SAME SIZE AS txt[]
-    //              THAT MAPS TO THE CORRESPONDING STARTING INDEX IN raw[]
 
     return NOMATCH;
 }
@@ -425,16 +417,16 @@ static void proc_command(rtfobj *R) {
 
 static void proc_cmd_escapedliteral(rtfobj *R) {
     add_to_txt(R->cmd[0], R);
-    R->attr->ignorable = false;
+    R->attr->starred = false; // We recognize command so...
 }
 
 static void proc_cmd_asterisk(rtfobj *R) {
-    R->attr->ignorable = true;
+    R->attr->starred = true;
 }
 
 static void proc_cmd_uc(rtfobj *R) {
     R->attr->uc = (size_t)get_num_arg(R->cmd);
-    R->attr->ignorable = false;
+    R->attr->starred = false; // We recognize command so...    
 }
 
 static void proc_cmd_u(rtfobj *R) {
@@ -442,7 +434,7 @@ static void proc_cmd_u(rtfobj *R) {
     encode_utf8(get_num_arg(R->cmd), utf8);
     add_string_to_txt(utf8, R);
     R->attr->uc0i = R->attr->uc;
-    R->attr->ignorable = false;
+    R->attr->starred = false; // We recognize command so...
 }
 
 static void proc_cmd_apostrophe(rtfobj *R) {
@@ -450,11 +442,11 @@ static void proc_cmd_apostrophe(rtfobj *R) {
     if (R->attr->uc0i) {
         R->attr->uc0i--;
     } else {
-        // TODO: CONVERT FROM CODE PAGE TO UNICODE
+        // TODO: CONVERT FROM CODE PAGE TO UNICODE (SEE HEADER TODO)
         encode_utf8(get_hex_arg(R->cmd), utf8);
         add_string_to_txt(utf8, R);
     }
-    R->attr->ignorable = false;
+    R->attr->starred = false; // We recognize command so...
 }
 
 static void proc_cmd_fonttbl(rtfobj *R) {
@@ -468,29 +460,28 @@ static void proc_cmd_fonttbl(rtfobj *R) {
         fputc(c, R->fout);
         clast = c;
     }
-    R->attr->ignorable = false;
+    R->attr->starred = false; // We recognize command so...
 }
 
 static void proc_cmd_ignoreblock(rtfobj *R) {
     skip_thru_block(R);
-    R->attr->ignorable = false;
+    R->attr->starred = false; // We recognize command so...
 }
 
 static void proc_cmd_newpar(rtfobj *R) {
     add_to_txt('\n', R);
     add_to_txt('\n', R);
-    R->attr->ignorable = false;
+    R->attr->starred = false; // We recognize command so...
 }
 
 static void proc_cmd_newline(rtfobj *R) {
     add_to_txt('\n', R);
-    R->attr->ignorable = false;
+    R->attr->starred = false; // We recognize command so...
 }
 
 static void proc_cmd_unknown(rtfobj *R) {
-    if (R->attr->ignorable) {
-        skip_thru_block(R);
-        R->attr->ignorable = false;
+    if (R->attr->starred) {
+        R->attr->shunted = true;
     }
 }
 
@@ -657,7 +648,7 @@ static void push_attr(rtfobj *R) {
     if (R->attr == NULL) {
         newattr->uc = 0;
         newattr->uc0i = 0;
-        newattr->ignorable = false;
+        newattr->starred = false;
         newattr->cpg = CPG_1252;
         newattr->outer = NULL;
         R->attr = newattr;

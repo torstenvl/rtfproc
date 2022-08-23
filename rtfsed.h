@@ -19,29 +19,13 @@
 #define   MATCH                 1
 
 
-//STRUCTURE DEFINITIONS
-
-// TODO: font table entries
-// 
-// typedef struct ftentry {
-//     int64_t k;
-//     int64_t v;
-// } dictentry;
-// 
-// typedef struct font {
-//     int8_t  N;
-//     cpg_t   cpg;
-// } font;
-
-
 
 typedef struct rtfattr {
     size_t uc;
     size_t uc0i;        // Iterator from uc to 0 after encountering \u
-    bool   ignorable;   // Marks a block as possibly ignorable after \*
-    bool   ignore;      // Marks a block as ignored after \* or otherwise
+    bool   starred;     // Block is potentially shuntable after \*
+    bool   shunted;     // Block should be shunted straight to output
     cpg_t  cpg;
-    // TODO: Indicate currently active fonttbl entry
 
     struct rtfattr *outer;
 } rtfattr;
