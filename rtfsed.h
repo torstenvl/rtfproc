@@ -21,13 +21,18 @@
 
 
 typedef struct rtfattr {
-    size_t uc;
-    size_t uc0i;        // Iterator from uc to 0 after encountering \u
-    bool   starred;     // Block is potentially shuntable after \*
-    bool   shunted;     // Block should be shunted straight to output
-    cpg_t  cpg;
-
-    struct rtfattr *outer;
+    size_t          uc;
+    size_t          uc0i;        // Iterator from uc to 0 after \u cmd
+         
+    bool            fonttbl;     // Currently defining a font table
+    bool            blkoptional; // Block is optional due to \*
+    bool            nocmd;       // Do not process commands in this block
+    bool            notxt;       // Do not process data as text in this block
+         
+    cpg_t           charset;     // Principally for Word
+    cpg_t           codepage;    // Principally for WordPad, Pages, TextEdit
+         
+    struct          rtfattr *outer;
 } rtfattr;
 
 
@@ -49,7 +54,6 @@ typedef struct rtfobj {
     char            cmd[CMD_BUFFER_SIZE];
 
     size_t          srchz;        // srch & replace pairs
-    size_t          srch_max_keylen;
     size_t          srch_match; 
     const char  **  srch_key;
     const char  **  srch_val;

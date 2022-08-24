@@ -94,7 +94,8 @@ static void proc_cmd_uc(rtfobj *R);
 static void proc_cmd_u(rtfobj *R);
 static void proc_cmd_apostrophe(rtfobj *R);
 static void proc_cmd_fonttbl(rtfobj *R);
-static void proc_cmd_ignoreblock(rtfobj *R);
+static void proc_cmd_f(rtfobj *R);
+static void proc_cmd_shuntblock(rtfobj *R);
 static void proc_cmd_newpar(rtfobj *R);
 static void proc_cmd_newline(rtfobj *R);
 static void proc_cmd_unknown(rtfobj *R);
@@ -173,7 +174,6 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **srch) {
     // Set up replacement dictionary
     for (i=0; srch[i] != NULL; i++); 
     R->srchz = i/2;
-    R->srch_max_keylen = 0UL;
     R->srch_match = 0UL; 
     R->srch_key = malloc(R->srchz * sizeof *R->srch_key);
     R->srch_val = malloc(R->srchz * sizeof *R->srch_val);
@@ -185,9 +185,6 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **srch) {
     for (i=0; i < R->srchz; i++) {
         R->srch_key[i] = srch[2*i];
         R->srch_val[i] = srch[2*i+1];
-        if (R->srch_max_keylen < strlen(R->srch_key[i])) {
-            R->srch_max_keylen = strlen(R->srch_key[i]);
-        }
     }
 
     R->attr = NULL;
@@ -263,7 +260,7 @@ static void dispatch_scope(int c, rtfobj *R) {
 
 static void dispatch_command(rtfobj *R) {
     add_to_raw('\\', R);
-    if (!(R->attr && R->attr->shunted)) {
+    if (!(R->attr && R->attr->nocmd)) {
         read_command(R);
         proc_command(R);
     }
@@ -274,7 +271,7 @@ static void dispatch_text(int c, rtfobj *R) {
     // Ignore newlines and carriage returns in RTF code. Consider tabs and
     // vertical tabs to be interchangeable with spaces. Treat everything else
     // literally. 
-    if (R->attr && R->attr->shunted) {                add_to_raw(c, R);     }
+    if (R->attr && R->attr->notxt) {                  add_to_raw(c, R);     }
     else if (c == '\n') {                             add_to_raw(c, R);     }
     else if (c == '\r') {                             add_to_raw(c, R);     } 
     else if (c == '\t') {     add_to_txt(' ', R);     add_to_raw(c, R);     }
@@ -400,33 +397,30 @@ static void proc_command(rtfobj *R) {
     else if (STRING_MATCH(R->cmd, "\\"))                        proc_cmd_escapedliteral(R);
     else if (STRING_MATCH(R->cmd, "{"))                         proc_cmd_escapedliteral(R);
     else if (STRING_MATCH(R->cmd, "}"))                         proc_cmd_escapedliteral(R);
-    else if (STRING_MATCH(R->cmd, "*"))                         proc_cmd_asterisk(R);
     else if (REGEX_MATCH(R->cmd, "^uc[0-9]+$"))                 proc_cmd_uc(R);
     else if (REGEX_MATCH(R->cmd, "^u-?[0-9]+$"))                proc_cmd_u(R);
     else if (REGEX_MATCH(R->cmd, "^\'[0-9A-Fa-f][0-9A-Fa-f]$")) proc_cmd_apostrophe(R);
     else if (REGEX_MATCH(R->cmd, "^fonttbl$"))                  proc_cmd_fonttbl(R);
-    else if (REGEX_MATCH(R->cmd, "^pict$"))                     proc_cmd_ignoreblock(R);
-    else if (REGEX_MATCH(R->cmd, "^colortbl$"))                 proc_cmd_ignoreblock(R);
-    else if (REGEX_MATCH(R->cmd, "^stylesheet$"))               proc_cmd_ignoreblock(R);
-    else if (REGEX_MATCH(R->cmd, "^operator$"))                 proc_cmd_ignoreblock(R);
-    else if (REGEX_MATCH(R->cmd, "^bin$"))                      proc_cmd_ignoreblock(R);
+    else if (REGEX_MATCH(R->cmd, "^f[0-9]+$"))                  proc_cmd_f(R);
+    else if (REGEX_MATCH(R->cmd, "^pict$"))                     proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(R->cmd, "^colortbl$"))                 proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(R->cmd, "^stylesheet$"))               proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(R->cmd, "^operator$"))                 proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(R->cmd, "^bin$"))                      proc_cmd_shuntblock(R);
     else if (REGEX_MATCH(R->cmd, "^par$"))                      proc_cmd_newpar(R);
     else if (REGEX_MATCH(R->cmd, "^line$"))                     proc_cmd_newline(R);
     else if (1)                                                 proc_cmd_unknown(R);
+    
+    if (STRING_MATCH(R->cmd, "*")) R->attr->blkoptional = true;
+    else                           R->attr->blkoptional = false;
 }
 
 static void proc_cmd_escapedliteral(rtfobj *R) {
     add_to_txt(R->cmd[0], R);
-    R->attr->starred = false; // We recognize command so...
-}
-
-static void proc_cmd_asterisk(rtfobj *R) {
-    R->attr->starred = true;
 }
 
 static void proc_cmd_uc(rtfobj *R) {
     R->attr->uc = (size_t)get_num_arg(R->cmd);
-    R->attr->starred = false; // We recognize command so...    
 }
 
 static void proc_cmd_u(rtfobj *R) {
@@ -434,7 +428,6 @@ static void proc_cmd_u(rtfobj *R) {
     encode_utf8(get_num_arg(R->cmd), utf8);
     add_string_to_txt(utf8, R);
     R->attr->uc0i = R->attr->uc;
-    R->attr->starred = false; // We recognize command so...
 }
 
 static void proc_cmd_apostrophe(rtfobj *R) {
@@ -446,42 +439,39 @@ static void proc_cmd_apostrophe(rtfobj *R) {
         encode_utf8(get_hex_arg(R->cmd), utf8);
         add_string_to_txt(utf8, R);
     }
-    R->attr->starred = false; // We recognize command so...
 }
 
 static void proc_cmd_fonttbl(rtfobj *R) {
-    output_raw(R);
-    reset_buffers(R);    
-    for (int braces = 1, clast = 0, c = 0; braces > 0; ) {
-        c = fgetc(R->fin);
-        if (c == EOF) { R->fatalerr = EIO; return; }
-        if (c == '{' && clast != '\\') braces++;
-        if (c == '}' && clast != '\\') braces--;
-        fputc(c, R->fout);
-        clast = c;
-    }
-    R->attr->starred = false; // We recognize command so...
+    R->attr->fonttbl = true;
+    R->attr->notxt = true;
 }
 
-static void proc_cmd_ignoreblock(rtfobj *R) {
-    skip_thru_block(R);
-    R->attr->starred = false; // We recognize command so...
+static void proc_cmd_f(rtfobj *R) {
+    if (R->attr->fonttbl) {
+        // Define a new font (with default fcharset)
+    } else {
+        // Set charset to the corresponding fcharset of the font
+    }
+}
+
+static void proc_cmd_shuntblock(rtfobj *R) {
+    R->attr->nocmd = true;
+    R->attr->notxt = true;
 }
 
 static void proc_cmd_newpar(rtfobj *R) {
     add_to_txt('\n', R);
     add_to_txt('\n', R);
-    R->attr->starred = false; // We recognize command so...
 }
 
 static void proc_cmd_newline(rtfobj *R) {
     add_to_txt('\n', R);
-    R->attr->starred = false; // We recognize command so...
 }
 
 static void proc_cmd_unknown(rtfobj *R) {
-    if (R->attr->starred) {
-        R->attr->shunted = true;
+    if (R->attr->blkoptional) {
+        R->attr->nocmd = true;
+        R->attr->notxt = true;
     }
 }
 
@@ -648,8 +638,10 @@ static void push_attr(rtfobj *R) {
     if (R->attr == NULL) {
         newattr->uc = 0;
         newattr->uc0i = 0;
-        newattr->starred = false;
-        newattr->cpg = CPG_1252;
+        newattr->blkoptional = false;
+        newattr->nocmd = false;
+        newattr->notxt = false;
+        newattr->fonttbl = false;
         newattr->outer = NULL;
         R->attr = newattr;
     } else {
@@ -686,37 +678,30 @@ static void pop_attr(rtfobj *R) {
 //////////////////////////////////////////////////////////////////////////////
 
 static void encode_utf8(int32_t c, char utf8[5]) {
-    if (c < 0x80) {
-        // (__ & 01111111)|00000000  ==> 0xxx xxxx
-        utf8[0] = (char)(c>>0  &  0x7F) | (char)0x00;  
-        utf8[1] = '\0';
-    }
-    else if (c < 0x0800) {
-        // (__ & 00011111)|11000000  ==> 110x xxxx
-        // (__ & 00111111)|10000000  ==> 10xx xxxx
-        utf8[0] = (char)(c>>6 & 0x1F) | (char)0xC0;
-        utf8[1] = (char)(c>>0 & 0x3F) | (char)0x80;
-        utf8[2] = '\0';
-    }
-    else if (c < 0x010000) {
-        // (__ & 00001111)|11100000  ==> 1110 xxxx
-        // (__ & 00111111)|10000000  ==> 10xx xxxx
-        // (__ & 00111111)|10000000  ==> 10xx xxxx
-        utf8[0] = (char)(c>>12 &  0x0F) | (char)0xE0; 
-        utf8[1] = (char)(c>>6  &  0x3F) | (char)0x80;
-        utf8[2] = (char)(c>>0  &  0x3F) | (char)0x80;
-        utf8[3] = '\0';
-    }
-    else if (c < 0x110000) {
-        // (__ & 00000111)|11110000  ==> 1111 0xxx
-        // (__ & 00111111)|10000000  ==> 10xx xxxx
-        // (__ & 00111111)|10000000  ==> 10xx xxxx
-        // (__ & 00111111)|10000000  ==> 10xx xxxx
-        utf8[0] = (char)(c>>18 &  0x07) | (char)0xF0;
-        utf8[1] = (char)(c>>12 &  0x3F) | (char)0x80;
-        utf8[2] = (char)(c>>6  &  0x3F) | (char)0x80;
-        utf8[3] = (char)(c>>0  &  0x3F) | (char)0x80;
-        utf8[4] = '\0';
+    char *u = utf8;
+    if (c < 0b000000000000010000000) { // Up to 7 bits
+        u[0]= (char)(c>>0  & 0b01111111 | 0b00000000);  // 7 bits –> 0xxxxxxx
+        u[1]= '\0';
+    } else
+    if (c < 0b000000000100000000000) { // Up to 11 bits
+        u[0]= (char)(c>>6  & 0b00011111 | 0b11000000);  // 5 bits –> 110xxxxx
+        u[1]= (char)(c>>0  & 0b00111111 | 0b10000000);  // 6 bits –> 10xxxxxx
+        u[2]= '\0';
+    } else
+    if (c < 0b000010000000000000000) { // Up to 16 bits
+        u[0]= (char)(c>>12 & 0b00001111 | 0b11100000);  // 4 bits –> 1110xxxx
+        u[1]= (char)(c>>6  & 0b00111111 | 0b10000000);  // 6 bits –> 10xxxxxx
+        u[2]= (char)(c>>0  & 0b00111111 | 0b10000000);  // 6 bits –> 10xxxxxx
+        u[3]= '\0';
+    } else
+    if (c < 0b100010000000000000000) { // Up to 21 bits
+        u[0]= (char)(c>>18 & 0b00000111 | 0b11110000);  // 3 bits –> 11110xxx
+        u[1]= (char)(c>>12 & 0b00111111 | 0b10000000);  // 6 bits –> 10xxxxxx
+        u[2]= (char)(c>>6  & 0b00111111 | 0b10000000);  // 6 bits –> 10xxxxxx
+        u[3]= (char)(c>>0  & 0b00111111 | 0b10000000);  // 6 bits –> 10xxxxxx
+        u[4]= '\0';
+    } else {
+        u[0]= '\0';
     }
 }
 

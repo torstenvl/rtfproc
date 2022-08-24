@@ -4,10 +4,8 @@
 |                                                                             |
 |-----------------------------------------------------------------------------|
 |                                                                             |
-|   BITSC LICENSE NOTICE                                                      |
-|                                                                             |
-|   CPGTOU – Code Page to Unicode                                             |
 |   Copyright (c) 2022 Joshua Lee Ockert <torstenvl@gmail.com>                |
+|   https://github.com/torstenvl                                              |
 |                                                                             |
 |   THIS WORK IS PROVIDED "AS IS" WITH NO WARRANTY OF ANY KIND. THE IMPLIED   |
 |   WARRANTIES OF MERCHANTABILITY, FITNESS, NON-INFRINGEMENT, AND TITLE ARE   |
@@ -19,7 +17,7 @@
 |                                                                             |
 |-----------------------------------------------------------------------------|
 |                                                                             |
-|           int32_t cpgtou(cpg_t cpg, uint16_t cpt, int32_t **mult)           |
+|    int32_t cpgtou(cpg_t cpg, uint8_t cpt, uint8_t *xtra, int32_t **mult)    |
 |                                                                             |
 |   USAGE                                                                     |
 |   -----                                                                     |
@@ -43,9 +41,8 @@
 |                                                                             |
 |     - If the (low) byte stored in cpt is the first half of a double-byte    |
 |       sequence (e.g., in ShiftJIS-based code pages), the function will      |
-|       return cpDBSQ (defined as -3).  It is the responsibility of the       |
-|       calling function to shift the first byte left and add (or) the next   |
-|       byte of the sequence before calling it again.                         |
+|       return cpDBSQ (defined as -3).  The byte stored in cpt will be stored |
+|       in the memory location pointed-to by xtra.                            |
 |                                                                             |
 |     - If the code point in cpt (whether single- or double-byte) codes for   |
 |       a character or sequence that must use multiple Unicode code points    |
@@ -66,9 +63,6 @@
 #define cpUNSP   -2      // Unsupported code page
 #define cpDBSQ   -3      // cpt is the first half of a double-byte sequence
 #define cpMULT   -4      // Look to last argument for a 0L-terminated list
-
-#define cpHIBYTE(c) ((c & 0xFF00) >> 8)
-#define cpLOBYTE(c) ((c & 0x00FF))
 
 typedef enum cpg_t {
     CPG_42    = 42,       // ❌ Windows Symbol
@@ -185,8 +179,8 @@ typedef enum cpg_t {
     PC        = 437,      // IBM United States
     PCA       = 850,      // IBM Multilingual
     MACROMAN  = 10000,    // Mac Roman
+    NONE      = cpNONE,
     UNSUPPORTED = cpUNSP
-
 } cpg_t;
 
 
@@ -217,7 +211,53 @@ typedef enum cpg_t {
 |                                                                            |
 \*--------------------------------------------------------------------------*/
 
-static int32_t cpgtou(cpg_t cpg, uint16_t cpt, const int32_t **mult) {
+static cpg_t cpgfromcpgnum(int32_t n) {
+    cpg_t retval;
+
+    retval =                    (n==42) ? CPG_42 :          (n==437) ? CPG_437 :
+    (n==708) ? CPG_708 :        (n==709) ? CPG_709 :        (n==710) ? CPG_710 :
+    (n==711) ? CPG_711 :        (n==720) ? CPG_720 :        (n==819) ? CPG_819 :
+    (n==850) ? CPG_850 :        (n==852) ? CPG_852 :        (n==860) ? CPG_860 :
+    (n==862) ? CPG_862 :        (n==863) ? CPG_863 :        (n==864) ? CPG_864 :
+    (n==865) ? CPG_865 :        (n==866) ? CPG_866 :        (n==874) ? CPG_874 :
+    (n==932) ? CPG_932 :        (n==936) ? CPG_936 :        (n==949) ? CPG_949 :
+    (n==950) ? CPG_950 :        (n==1250) ? CPG_1250 :      (n==1251) ? CPG_1251 :
+    (n==1252) ? CPG_1252 :      (n==1253) ? CPG_1253 :      (n==1254) ? CPG_1254 :
+    (n==1255) ? CPG_1255 :      (n==1256) ? CPG_1256 :      (n==1257) ? CPG_1257 :
+    (n==1258) ? CPG_1258 :      (n==1361) ? CPG_1361 :      (n==10000) ? CPG_10000 :
+    (n==10001) ? CPG_10001 :    (n==10002) ? CPG_10002 :    (n==10003) ? CPG_10003 :
+    (n==10004) ? CPG_10004 :    (n==10005) ? CPG_10005 :    (n==10006) ? CPG_10006 :
+    (n==10007) ? CPG_10007 :    (n==10008) ? CPG_10008 :    (n==10021) ? CPG_10021 :
+    (n==10029) ? CPG_10029 :    (n==10081) ? CPG_10081 :    (n==57002) ? CPG_57002 :
+    (n==57003) ? CPG_57003 :    (n==57004) ? CPG_57004 :    (n==57005) ? CPG_57005 :
+    (n==57006) ? CPG_57006 :    (n==57007) ? CPG_57007 :    (n==57008) ? CPG_57008 :
+    (n==57009) ? CPG_57009 :    (n==57010) ? CPG_57010 :    (n==57011) ? CPG_57011 :
+    UNSUPPORTED;
+
+    return retval;
+}
+
+static cpg_t cpgfromcharsetnum(int32_t n) {
+    cpg_t retval;
+
+    retval =                    (n==0) ? CHSET_0 :          (n==1) ? CHSET_1 :
+    (n==2) ? CHSET_2 :          (n==77) ? CHSET_77 :        (n==78) ? CHSET_78 :
+    (n==79) ? CHSET_79 :        (n==80) ? CHSET_80 :        (n==81) ? CHSET_81 :
+    (n==82) ? CHSET_82 :        (n==83) ? CHSET_83 :        (n==84) ? CHSET_84 :
+    (n==85) ? CHSET_85 :        (n==86) ? CHSET_86 :        (n==87) ? CHSET_87 :
+    (n==88) ? CHSET_88 :        (n==89) ? CHSET_89 :        (n==128) ? CHSET_128 :
+    (n==129) ? CHSET_129 :      (n==130) ? CHSET_130 :      (n==134) ? CHSET_134 :
+    (n==136) ? CHSET_136 :      (n==161) ? CHSET_161 :      (n==162) ? CHSET_162 :
+    (n==163) ? CHSET_163 :      (n==177) ? CHSET_177 :      (n==178) ? CHSET_178 :
+    (n==179) ? CHSET_179 :      (n==180) ? CHSET_180 :      (n==181) ? CHSET_181 :
+    (n==186) ? CHSET_186 :      (n==204) ? CHSET_204 :      (n==222) ? CHSET_222 :
+    (n==238) ? CHSET_238 :      (n==254) ? CHSET_254 :      (n==255) ? CHSET_255 :
+    UNSUPPORTED;
+
+    return retval;
+}
+
+static int32_t cpgtou(cpg_t cpg, uint8_t cpt, uint8_t *xtra, const int32_t **mult) {
 
     static const int32_t CPG_437_TBL[128] = {
         0x00C7,  0x00FC,  0x00E9,  0x00E2,  0x00E4,  0x00E0,  0x00E5,  0x00E7,
@@ -4314,7 +4354,7 @@ static int32_t cpgtou(cpg_t cpg, uint16_t cpt, const int32_t **mult) {
                0x2551, 0x2550, 0x256D, 0x256E, 0x2570, 0x256F, 0x2593       }
     };
 
-    static const int32_t cmpxxxxx_none[] = {cpNONE,0L};
+    static const int32_t cpmxxxxx_none[] = {cpNONE,0L};
     
     static const int32_t cpm10001_87FB[] = {0x6709,0x9650,0x4F1A,0x793E,0L};
     static const int32_t cpm10001_87FC[] = {0x8CA1,0x56E3,0x6CD5,0x4EBA,0L};
@@ -4406,14 +4446,15 @@ static int32_t cpgtou(cpg_t cpg, uint16_t cpt, const int32_t **mult) {
     static const int32_t cpm10005_00FE[] = {0x202E,0x005B,0x202C,0L};
     static const int32_t cpm10005_00FF[] = {0x202E,0x007C,0x202C,0L};
 
-    uint8_t lo = cpLOBYTE(cpt);
-    uint8_t hi = cpHIBYTE(cpt);
-    uint8_t c =  lo;
+    uint8_t c =  cpt;
+    uint8_t lo = cpt;
+    uint8_t hi = *xtra;
     
     int32_t r = 0;
 
     switch(cpg) {
         case cpUNSP:      r = cpUNSP;                               break;
+        case cpNONE:      r = cpUNSP;                               break;
         case CPG_437:     r = (c<128) ? c : CPG_437_TBL[c-128];     break;
         case CPG_708:     r = (c<128) ? c : CPG_708_TBL[c-128];     break;
         case CPG_709:     r = cpUNSP;                               break;
@@ -4469,15 +4510,18 @@ static int32_t cpgtou(cpg_t cpg, uint16_t cpt, const int32_t **mult) {
             \*----------------------------------------------------------*/
             if (hi == 0) { 
                 r = (c < 128) ? c : CPG_932_TBL[c-128];
+                *xtra = (r == cpDBSQ) ? c : 0;
             } else {
                 hi = (hi & 0x3F) - 1;
                 lo = lo - 0x40;
                 if ((hi > 59) || (lo > 188)) { // Sequence error, try recovery
                     r = (c < 128) ? c : CPG_932_TBL[c-128];
+                    *xtra = (r == cpDBSQ) ? c : 0;
                 } else {
                     r = SJIS_932_TBL[hi][lo];
                     if (r == cpNONE) { // Sequence error, try recovery
                         r = (c < 128) ? c : CPG_932_TBL[c-128];
+                        *xtra = (r == cpDBSQ) ? c : 0;
                     } 
                 }
             }
@@ -4488,12 +4532,15 @@ static int32_t cpgtou(cpg_t cpg, uint16_t cpt, const int32_t **mult) {
             \*----------------------------------------------------------*/
             if (hi == 0) { 
                 r = (c<128) ? c : (0xA1<=c && c<=0xF9) ? cpDBSQ : cpNONE;
+                *xtra = (r == cpDBSQ) ? c : 0;
             } else {
                 // Try recovery if there's a sequence error
                 if (hi<0xA1 || hi>0xF9) {
                     r = (c<128) ? c : (0xA1<=c && c<=0xF9) ? cpDBSQ : cpNONE;
+                    *xtra = (r == cpDBSQ) ? c : 0;
                 } else if (lo<0x40 || lo>0xFE || (0x80 <= lo && lo <= 0x9F)) {
                     r = (c<128) ? c : (0xA1<=c && c<=0xF9) ? cpDBSQ : cpNONE;
+                    *xtra = (r == cpDBSQ) ? c : 0;
                 }
                 // Otherwise get the double-byte mapping
                 else {    
@@ -4510,17 +4557,20 @@ static int32_t cpgtou(cpg_t cpg, uint16_t cpt, const int32_t **mult) {
             \*----------------------------------------------------------*/
             if (hi == 0) { 
                 r = (c<128) ? c : CPG_10001_TBL[c-128];
+                *xtra = (r == cpDBSQ) ? c : 0;
             } else {
                 hi = (hi & 0x3F) - 1;
                 lo = lo - 0x40;
                 if ((hi > 59) || (lo > 188)) { // Sequence error, try recovery
                     r = (c < 128) ? c : CPG_10001_TBL[c-128];
+                    *xtra = (r == cpDBSQ) ? c : 0;
                 } else {
                     r = SJIS_APL_TBL[hi][lo]; 
                     if (r == cpNONE) { // Sequence error, try recovery
                         r = (c < 128) ? c : CPG_10001_TBL[c-128];
+                        *xtra = (r == cpDBSQ) ? c : 0;
                     } else if (r == cpMULT) {
-                        switch (cpt) {
+                        switch ((*xtra << 8) | cpt) {
                             case 0x87FB:    *mult = cpm10001_87FB;    break;
                             case 0x87FC:    *mult = cpm10001_87FC;    break;
                             case 0x8591:    *mult = cpm10001_8591;    break;
@@ -4535,7 +4585,7 @@ static int32_t cpgtou(cpg_t cpg, uint16_t cpt, const int32_t **mult) {
                             case 0x8791:    *mult = cpm10001_8791;    break;
                             case 0x8792:    *mult = cpm10001_8792;    break;
                             case 0x879D:    *mult = cpm10001_879D;    break;
-                            default:        *mult = cmpxxxxx_none; 
+                            default:        *mult = cpmxxxxx_none; 
                         }
                     }
                 }
@@ -4617,7 +4667,7 @@ static int32_t cpgtou(cpg_t cpg, uint16_t cpt, const int32_t **mult) {
                 case 0x00FD:   r = cpMULT;   *mult = cpm10005_00FD;   break;
                 case 0x00FE:   r = cpMULT;   *mult = cpm10005_00FE;   break;
                 case 0x00FF:   r = cpMULT;   *mult = cpm10005_00FF;   break;
-                default: *mult = NULL; r = (c<128)?c : CPG_10005_TBL[c-128];
+                default: *mult = NULL; r = (c<128)?c : CPG_10005_TBL[c-128]; *xtra = (r == cpDBSQ) ? c : 0;
             }
             break;
 
