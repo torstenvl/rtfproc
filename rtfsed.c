@@ -1,39 +1,51 @@
-// ---------------------------------------------------------------------------- 
+// ----------------------------------------------------------------------------
 // TODO
-//   - Implement a font table. Because document fonttbl entries are not 
-//     guaranteed to be in consecutive ordinal order, it may be highly
-//     space-inefficient to store font table entries in a sparse array,
-//     though it would give O(1) access. The next best way might be to store
-//     them in a dense sorted array of fonttbl entries, with insertion/
-//     insertion sort and binary search retrieval. This should give O(log N)
-//     access. 
+//   - Implement a font table. Because document fonttbl entries are not
+//     guaranteed to be in consecutive ordinal order, it may be highly space-
+//     inefficient to store font table entries in a sparse array, though it
+//     would give O(1) access. The next best way might be to store them in a
+//     dense sorted array of fonttbl entries, with binary search-insertion and
+//     binary search retrieval. This should give O(log N) access.
 //
 //   - Add attributes for \ansicpgN, font tables with \fcharsetN and/or
 //     \cpgN, and \cchsN. Interpret \'xx according to current character set
 //     or code page. 
+//         NOTE: Different processors recognize these differently, and end-
+//         users will be VERY disappointed if we don't match based on what
+//         they see in the word processor.  We should, at some point, try to
+//         divine the word processor used and mimic its interpretation of
+//         how (whether) to recognize these different character set specs.
 //
 //   - Normalize replacement tokens as well as any Unicode in the text before
 //     comparison.  Use NFC (or maybe NFD?) normalization.
 //   
 //   - Add support for late partial matches. Example:
-//             "ATTORNEY" => "Mr. Smith"
+//         Replacements
+//             "ATTORNEY"     => "Mr. Smith"
 //             "TORTLOCATION" => "December 12, 2021"
-//          Text has 
-//             "THEY CONVENED ATTORTLOCATION..." [sic]
-//          Current design would fail to replace TORTLOCATION because
-//          the entirety of the raw buffer corresponding to "ATTORT" would
-//          be discarded (since the partial match for ATTORNEY was
-//          invalidated).
+//         Text has 
+//             "THEY MET ATTORTLOCATION..." [sic]
+//         Problem
+//             Once the partial match ATTOR is invalidated with ATTORT,
+//             the raw buffer will be flushed and matching will begin
+//             with LOCATION.  The match for TORTLOCATION will never be
+//             found.
+//         Solution
+//             Brute force
+//             -----------
+//             Iterate through file multiple times, using intermediate temp
+//             files, and only doing one replacement at a time.
 //
-//          Instead, we could iterate through and discover that 
-//             strncmp(&R->txt[2], R->srch_key[?], R->ti-2)
-//
-//          However, unclear what to do then since we don't track what
-//          part of the text buffer corresponds to what part of the raw
-//          buffer. 
-//  
-//          IDEA: COULD HAVE AN ARRAY OF SIZE_Ts THE SAME SIZE AS txt[]
-//              THAT MAPS TO THE CORRESPONDING STARTING INDEX IN raw[]
+//             More clever
+//             -----------
+//             Use a size_t txtrawmap[] with the same no. of elements as
+//             txt[], where raw[txtrawmap[i]] is the start of txt[i] in
+//             the RTF code. Loop size_t offset to ti and discover that
+//               !strncmp(&R->txt[offset], R->srch_key[__], R->ti-offset)
+//               (when offset == 2)
+//             Then we can output raw[0] through raw[txtrawmap[i]], and
+//             memmove() raw[] and txt[] (and adjust ri and ti) to begin
+//             processing our new partial match. 
 // ---------------------------------------------------------------------------- 
 
 
@@ -112,7 +124,6 @@ static void reset_buffers(rtfobj *R);
 static void reset_raw_buffer(rtfobj *R);
 static void reset_txt_buffer(rtfobj *R);
 static void reset_cmd_buffer(rtfobj *R);
-static void skip_thru_block(rtfobj *R);
 
 static void encode_utf8(int32_t c, char utf8[5]);
 static void memzero(void *const p, const size_t n);
@@ -229,8 +240,12 @@ void rtfreplace(rtfobj *R) {
 
         switch (pattern_match(R)) {
             case PARTIAL:        /* Keep reading */        break;
-            case MATCH:          output_match(R);          break;
-            case NOMATCH:        output_raw(R);            break;
+            case MATCH:          output_match(R);
+                                 reset_raw_buffer(R);
+                                 reset_txt_buffer(R);      break;
+            case NOMATCH:        output_raw(R);
+                                 reset_raw_buffer(R);
+                                 reset_txt_buffer(R);      break;
         }
         
         if (R->fatalerr)  {  LOG("Encountered a fatal error");  return;  }
@@ -415,13 +430,16 @@ static void proc_command(rtfobj *R) {
     else                           R->attr->blkoptional = false;
 }
 
+
 static void proc_cmd_escapedliteral(rtfobj *R) {
     add_to_txt(R->cmd[0], R);
 }
 
+
 static void proc_cmd_uc(rtfobj *R) {
     R->attr->uc = (size_t)get_num_arg(R->cmd);
 }
+
 
 static void proc_cmd_u(rtfobj *R) {
     char utf8[5];
@@ -429,6 +447,7 @@ static void proc_cmd_u(rtfobj *R) {
     add_string_to_txt(utf8, R);
     R->attr->uc0i = R->attr->uc;
 }
+
 
 static void proc_cmd_apostrophe(rtfobj *R) {
     char utf8[5];
@@ -441,10 +460,12 @@ static void proc_cmd_apostrophe(rtfobj *R) {
     }
 }
 
+
 static void proc_cmd_fonttbl(rtfobj *R) {
     R->attr->fonttbl = true;
     R->attr->notxt = true;
 }
+
 
 static void proc_cmd_f(rtfobj *R) {
     if (R->attr->fonttbl) {
@@ -454,19 +475,23 @@ static void proc_cmd_f(rtfobj *R) {
     }
 }
 
+
 static void proc_cmd_shuntblock(rtfobj *R) {
     R->attr->nocmd = true;
     R->attr->notxt = true;
 }
+
 
 static void proc_cmd_newpar(rtfobj *R) {
     add_to_txt('\n', R);
     add_to_txt('\n', R);
 }
 
+
 static void proc_cmd_newline(rtfobj *R) {
     add_to_txt('\n', R);
 }
+
 
 static void proc_cmd_unknown(rtfobj *R) {
     if (R->attr->blkoptional) {
@@ -484,13 +509,27 @@ static void proc_cmd_unknown(rtfobj *R) {
 ////                                                                      ////
 //////////////////////////////////////////////////////////////////////////////
 
+static void add_to_raw(int c, rtfobj *R) {
+    if (R->ri+1 >= R->rawz) {
+        LOG("Exhausted raw buffer.");
+        LOG("R->ri = %zu. Last raw data: \'%s\'", R->ri, &R->raw[R->ri-80]);
+        LOG("No match within limits. Flushing buffers, attempting recovery");
+        output_raw(R);
+        reset_raw_buffer(R);
+        reset_txt_buffer(R);
+        reset_cmd_buffer(R);
+    }
+    R->raw[R->ri++] = (char)c;
+}
+
 static void add_to_txt(int c, rtfobj *R) {
     if (R->ti+1 >= R->txtz) {
         LOG("Exhausted txt buffer.");
         LOG("R->ti = %zu. Last txt data: \'%s\'", R->ti, &R->txt[R->ti-80]);
         LOG("No match within limits. Flushing buffers, attempting recovery");
         output_raw(R);
-        reset_buffers(R);
+        reset_raw_buffer(R);
+        reset_txt_buffer(R);
     }
     if (R->attr->uc0i) {
         R->attr->uc0i--;
@@ -499,6 +538,17 @@ static void add_to_txt(int c, rtfobj *R) {
     }
 }
 
+static void add_to_cmd(int c, rtfobj *R) {
+    if (R->ci+1 >= R->cmdz) {
+        LOG("Exhausted cmd buffer.");
+        LOG("R->ci = %zu. Last cmd data: \'%s\'", R->ci, &R->cmd[R->ci-80]);
+        LOG("No match within limits. Flushing buffers, attempting recovery");
+        output_raw(R);
+        reset_raw_buffer(R);
+        reset_cmd_buffer(R);
+    }
+    R->cmd[R->ci++] = (char)c;
+}
 
 static void add_string_to_txt(const char *s, rtfobj *R) {
     if (R->ti+strlen(s) >= R->txtz) {
@@ -506,35 +556,14 @@ static void add_string_to_txt(const char *s, rtfobj *R) {
         LOG("R->ti = %zu. Last txt data: \'%s\'", R->ti, &R->txt[R->ti-80]);
         LOG("No match within limits. Flushing buffers, attempting recovery");
         output_raw(R);
-        reset_buffers(R);
+        reset_raw_buffer(R);
+        reset_txt_buffer(R);
     }
 
     while (*s) add_to_txt((int)(*s++), R);
 }
 
 
-static void add_to_cmd(int c, rtfobj *R) {
-    if (R->ci+1 >= R->cmdz) {
-        LOG("Exhausted cmd buffer.");
-        LOG("R->ci = %zu. Last cmd data: \'%s\'", R->ci, &R->cmd[R->ci-80]);
-        LOG("No match within limits. Flushing buffers, attempting recovery");
-        output_raw(R);
-        reset_buffers(R);
-    }
-    R->cmd[R->ci++] = (char)c;
-}
-
-
-static void add_to_raw(int c, rtfobj *R) {
-    if (R->ri+1 >= R->rawz) {
-        LOG("Exhausted raw buffer.");
-        LOG("R->ri = %zu. Last raw data: \'%s\'", R->ri, &R->raw[R->ri-80]);
-        LOG("No match within limits. Flushing buffers, attempting recovery");
-        output_raw(R);
-        reset_buffers(R);
-    }
-    R->raw[R->ri++] = (char)c;
-}
 
 
 static void reset_buffers(rtfobj *R) {
@@ -545,20 +574,26 @@ static void reset_buffers(rtfobj *R) {
 
 
 static void reset_raw_buffer(rtfobj *R) {
-    R->ri = 0UL;
-    memzero(R->raw, R->rawz);
+    if (R->ri > 0) {
+        R->ri = 0UL;
+        memzero(R->raw, R->rawz);
+    }
 }
 
 
 static void reset_txt_buffer(rtfobj *R) {
-    R->ti = 0UL;
-    memzero(R->txt, R->txtz);
+    if (R->ti > 0) {
+        R->ti = 0UL;
+        memzero(R->txt, R->txtz);
+    }
 }
 
 
 static void reset_cmd_buffer(rtfobj *R) {
-    R->ci = 0UL;
-    memzero(R->cmd, R->cmdz);
+    if (R->ci > 0) {
+        R->ci = 0UL;
+        memzero(R->cmd, R->cmdz);
+    }
 }
 
 
@@ -589,30 +624,13 @@ static void output_match(rtfobj *R) {
         else if (R->raw[i] == '{') fputc('{', R->fout);
         else if (R->raw[i] == '}') fputc('}', R->fout);
     }
-
-    reset_buffers(R);
 }
 
 
 static void output_raw(rtfobj *R) {
     fwrite(R->raw, 1, R->ri, R->fout);
-    reset_buffers(R);
 }
 
-
-static void skip_thru_block(rtfobj *R) {
-    output_raw(R);
-    reset_buffers(R);
-    
-    for (int braces = 1, clast = 0, c = 0; braces > 0; ) {
-        c = fgetc(R->fin);
-        if (c == EOF) { R->fatalerr = EIO; return; }
-        if (c == '{' && clast != '\\') braces++;
-        if (c == '}' && clast != '\\') braces--;
-        fputc(c, R->fout);
-        clast = c;
-    }
-}
 
 
 
