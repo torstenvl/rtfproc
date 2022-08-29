@@ -49,42 +49,11 @@
 // ---------------------------------------------------------------------------- 
 
 
-
-// NOTES
-// {\fonttbl\f0\fmodern\fcharset0 Courier;}
-// {\fonttbl
-// {\f0\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
-// {\f37\fbidi \fswiss\fcharset0\fprq2{\*\panose 020f0502020204030204}Calibri;}
-// {\flomajor\f31500\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
-// {\fdbmajor\f31501\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
-// {\fhimajor\f31502\fbidi \fswiss\fcharset0\fprq2{\*\panose 020f0302020204030204}Calibri Light;}
-// {\fbimajor\f31503\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
-// {\flominor\f31504\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
-// {\fdbminor\f31505\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
-// {\fhiminor\f31506\fbidi \fswiss\fcharset0\fprq2{\*\panose 020f0502020204030204}Calibri;}
-// {\fbiminor\f31507\fbidi \froman\fcharset0\fprq2{\*\panose 02020603050405020304}Times New Roman;}
-// {\f42\fbidi \froman\fcharset238\fprq2 Times New Roman CE;}
-
-// {\flomajor\f31514\fbidi \froman\fcharset178\fprq2 Times New Roman (Arabic);}
-// {\fdbmajor\f31524\fbidi \froman\fcharset178\fprq2 Times New Roman (Arabic);}
-// {\fhimajor\f31534\fbidi \fswiss\fcharset178\fprq2 Calibri Light (Arabic);}
-// {\fbimajor\f31544\fbidi \froman\fcharset178\fprq2 Times New Roman (Arabic);}
-// {\flominor\f31554\fbidi \froman\fcharset178\fprq2 Times New Roman (Arabic);}
-// {\fdbminor\f31564\fbidi \froman\fcharset178\fprq2 Times New Roman (Arabic);}
-// {\fhiminor\f31574\fbidi \fswiss\fcharset178\fprq2 Calibri (Arabic);}
-// {\fbiminor\f31584\fbidi \froman\fcharset178\fprq2 Times New Roman (Arabic);}
-// }
-
-
-
-
-
-//////////////////////////////////////////////////////////////////////////////
-////                                                                      ////
-////                       DECLARATIONS & MACROS                          ////
-////                                                                      ////
-//////////////////////////////////////////////////////////////////////////////
-
+/*-------------------------------------------------------------------------*\
+|                                                                           |
+|                           DECLARATIONS & MACROS                           |
+|                                                                           |
+\*-------------------------------------------------------------------------*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -120,7 +89,6 @@ static void add_to_txt(int c, rtfobj *R);
 static void add_string_to_txt(const char *s, rtfobj *R);
 static void add_to_cmd(int c, rtfobj *R);
 static void add_to_raw(int c, rtfobj *R);
-static void reset_buffers(rtfobj *R);
 static void reset_raw_buffer(rtfobj *R);
 static void reset_txt_buffer(rtfobj *R);
 static void reset_cmd_buffer(rtfobj *R);
@@ -131,13 +99,8 @@ static int32_t get_num_arg(const char *s);
 static int32_t get_hex_arg(const char *s);
 
 // Macros
-
-// Macros specific to proc_command()
+// #define RTFDEBUG
 #define REGEX_MATCH(x, y)    (re_match(y, x, NULL) > -1)
-#define STRING_MATCH(x, y)   (!strcmp(x, y))
-
-// Macros for logging and debugging
-#define RTFDEBUG
 #ifdef RTFDEBUG
     #define DBUG(...) (LOG(__VA_ARGS__))
 #else
@@ -150,21 +113,16 @@ static int32_t get_hex_arg(const char *s);
 
 
 
-
-//////////////////////////////////////////////////////////////////////////////
-////                                                                      ////
-////             CONSTRUCTOR/DESTRUCTOR FOR NEW RTF OBJECTS               ////
-////                                                                      ////
-//////////////////////////////////////////////////////////////////////////////
-
+/*-------------------------------------------------------------------------*\
+|                                                                           |
+|               CONSTRUCTOR/DESTRUCTOR FOR NEW RTF OBJECTS                  |
+|                                                                           |
+\*-------------------------------------------------------------------------*/
 rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **srch) {
     size_t i;
     rtfobj *R = malloc(sizeof *R);
 
-    if (!R) {
-        LOG("Failed allocating new RTF Object.");
-        return NULL;
-    }
+    if (!R) { LOG("Failed allocating new RTF Object."); return NULL; }
 
     // Set up file streams    
     R->fin = fin;
@@ -218,12 +176,11 @@ void delete_rtfobj(rtfobj *R) {
 
 
 
-//////////////////////////////////////////////////////////////////////////////
-////                                                                      ////
-////                           MAIN LOGIC LOOP                            ////
-////                                                                      ////
-//////////////////////////////////////////////////////////////////////////////
-
+/*-------------------------------------------------------------------------*\
+|                                                                           |
+|                  MAIN PROCESSING LOOP & LIBRARY ENTRY                     |
+|                                                                           |
+\*-------------------------------------------------------------------------*/
 void rtfreplace(rtfobj *R) {
     int c;
 
@@ -235,8 +192,6 @@ void rtfreplace(rtfobj *R) {
             case '\\':          dispatch_command(R);       break;
             default:            dispatch_text(c, R);       break;
         }
-
-        if (R->fatalerr)  {  LOG("Encountered a fatal error");  return;  }
 
         switch (pattern_match(R)) {
             case PARTIAL:        /* Keep reading */        break;
@@ -274,11 +229,19 @@ static void dispatch_scope(int c, rtfobj *R) {
 
 
 static void dispatch_command(rtfobj *R) {
-    add_to_raw('\\', R);
-    if (!(R->attr && R->attr->nocmd)) {
-        read_command(R);
-        proc_command(R);
+    read_command(R);
+    proc_command(R);
+    // Add command to raw buffer. This isn't done during read_command()
+    // IOT ensure all text is added to R->txt before corresponding code is
+    //     added to R->raw
+    // IOT allow us to defer flushing R->raw until first addition to R->txt
+    //     instead of doing it every iteration
+    //     BUT not accidentally including text-generating RTF code when
+    //         the text it generates should be replaced. 
+    for (char *s = R->cmd; *s != '\0'; s++) {
+        add_to_raw((int)(*s), R);
     }
+
 }
 
 
@@ -311,9 +274,6 @@ static void dispatch_text(int c, rtfobj *R) {
 static int pattern_match(rtfobj *R) {
     size_t i;
 
-    // All raw RTF code without a text counterpart is per se a NOMATCH
-    if (R->ri > 0 && R->ti == 0) return NOMATCH;
-
     // Check for complete matches
     for (i = 0; i < R->srchz; i++) {
         if (!strcmp(R->txt, R->srch_key[i])) {
@@ -322,7 +282,11 @@ static int pattern_match(rtfobj *R) {
         }
     }
 
-    // Check for partial matches at current offset
+    // Check for partial matches at current offset. This includes an empty
+    // text buffer with data in the raw buffer. To prevent discarding raw 
+    // RTF that's important when there's a match, we output the raw buffer
+    // when we FIRST add to the text buffer (see below) rather than on every
+    // input byte that doesn't contain text. 
     for (i = 0; i < R->srchz; i++) {
         if (!strncmp(R->txt, R->srch_key[i], R->ti)) {
             return PARTIAL;
@@ -350,6 +314,8 @@ static void read_command(rtfobj *R) {
 
     reset_cmd_buffer(R);
 
+    add_to_cmd('\\', R);
+
     if ((c=fgetc(R->fin)) == EOF) { LOG("Unexpected EOF"); R->fatalerr = EIO; return; }
 
     switch (c) {
@@ -358,92 +324,86 @@ static void read_command(rtfobj *R) {
         case '\\': // Escaped literal
         case '*':  // Special one-character command
             add_to_cmd(c, R);
-            add_to_raw(c, R);
             break;
         case '\r':
-            add_to_cmd('p', R);
-            add_to_cmd('a', R);
-            add_to_cmd('r', R);
-            add_to_raw('\r', R);
+            add_to_cmd('\r', R);
             break;
         case '\n':
-            add_to_cmd('p', R);
-            add_to_cmd('a', R);
-            add_to_cmd('r', R);
-            add_to_raw('\n', R);
+            add_to_cmd('\n', R);
             break;
         case '\'':
             add_to_cmd(c, R);
-            add_to_raw(c, R);
 
             if ((c=fgetc(R->fin)) == EOF) { LOG("Unexpected EOF"); R->fatalerr = EIO; break; }
             add_to_cmd(c, R);
-            add_to_raw(c, R);
 
             if ((c=fgetc(R->fin)) == EOF) { LOG("Unexpected EOF"); R->fatalerr = EIO; break; }
             add_to_cmd(c, R);
-            add_to_raw(c, R);
 
             break;
         default:
             if (!isalnum(c)) { LOG("Invalid command format..."); R->fatalerr = EINVAL; break; }
             add_to_cmd(c, R);
-            add_to_raw(c, R);
 
             // Greedily add input bytes to command buffer, so long as they're valid
             while(isalnum(c = fgetc(R->fin))) {
                 add_to_cmd(c, R);
-                add_to_raw(c, R);
             }
 
             // Stopped getting valid command bytes. What now? Depends on if it's an EOF 
             // or a space or something else. "Something else" is probably a backslash
             // for the next command, so we need to put it back on the input stream.
-            if (isspace(c))     add_to_raw(c, R);
-            else if (c == EOF)  LOG("Unexpected EOF") && (R->fatalerr = EIO);
-            else                ungetc(c, R->fin);
+            if (c == EOF)         LOG("Unexpected EOF") && (R->fatalerr = EIO);
+            else if (isspace(c))  add_to_cmd(c, R);
+            else                  ungetc(c, R->fin);
             break;
     }
 }
 
 
 static void proc_command(rtfobj *R) {
+    // Set pointer for internal use so that we don't have to deal with 
+    // backslashes at the beginning of our regular expression matching
+    char *cmd = &R->cmd[1];
+
     if (0); 
-    else if (STRING_MATCH(R->cmd, "\\"))                        proc_cmd_escapedliteral(R);
-    else if (STRING_MATCH(R->cmd, "{"))                         proc_cmd_escapedliteral(R);
-    else if (STRING_MATCH(R->cmd, "}"))                         proc_cmd_escapedliteral(R);
-    else if (REGEX_MATCH(R->cmd, "^uc[0-9]+$"))                 proc_cmd_uc(R);
-    else if (REGEX_MATCH(R->cmd, "^u-?[0-9]+$"))                proc_cmd_u(R);
-    else if (REGEX_MATCH(R->cmd, "^\'[0-9A-Fa-f][0-9A-Fa-f]$")) proc_cmd_apostrophe(R);
-    else if (REGEX_MATCH(R->cmd, "^fonttbl$"))                  proc_cmd_fonttbl(R);
-    else if (REGEX_MATCH(R->cmd, "^f[0-9]+$"))                  proc_cmd_f(R);
-    else if (REGEX_MATCH(R->cmd, "^pict$"))                     proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(R->cmd, "^colortbl$"))                 proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(R->cmd, "^stylesheet$"))               proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(R->cmd, "^operator$"))                 proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(R->cmd, "^bin$"))                      proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(R->cmd, "^par$"))                      proc_cmd_newpar(R);
-    else if (REGEX_MATCH(R->cmd, "^line$"))                     proc_cmd_newline(R);
-    else if (1)                                                 proc_cmd_unknown(R);
+    else if (REGEX_MATCH(cmd, "^\\$"))                         proc_cmd_escapedliteral(R);
+    else if (REGEX_MATCH(cmd, "^{$"))                          proc_cmd_escapedliteral(R);
+    else if (REGEX_MATCH(cmd, "^}$"))                          proc_cmd_escapedliteral(R);
+    else if (REGEX_MATCH(cmd, "^uc[0-9]+ ?$"))                 proc_cmd_uc(R);
+    else if (REGEX_MATCH(cmd, "^u-?[0-9]+ ?$"))                proc_cmd_u(R);
+    else if (REGEX_MATCH(cmd, "^\'[0-9A-Fa-f][0-9A-Fa-f] ?$")) proc_cmd_apostrophe(R);
+    else if (REGEX_MATCH(cmd, "^fonttbl ?$"))                  proc_cmd_fonttbl(R);
+    else if (REGEX_MATCH(cmd, "^f[0-9]+ ?$"))                  proc_cmd_f(R);
+    else if (REGEX_MATCH(cmd, "^pict ?$"))                     proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(cmd, "^colortbl ?$"))                 proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(cmd, "^stylesheet ?$"))               proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(cmd, "^operator ?$"))                 proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(cmd, "^bin ?$"))                      proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(cmd, "^par ?$"))                      proc_cmd_newpar(R);
+    else if (REGEX_MATCH(cmd, "^line ?$"))                     proc_cmd_newline(R);
+    else if (1)                                                proc_cmd_unknown(R);
     
-    if (STRING_MATCH(R->cmd, "*")) R->attr->blkoptional = true;
-    else                           R->attr->blkoptional = false;
+    // If the command is \* then the entire block is optional, but... if we 
+    // then recognize the command, revoke that 'optional' status.
+    if (REGEX_MATCH(R->cmd, "^*$")) R->attr->blkoptional = true;
+    else                            R->attr->blkoptional = false;
 }
 
 
 static void proc_cmd_escapedliteral(rtfobj *R) {
-    add_to_txt(R->cmd[0], R);
+    add_to_txt(R->cmd[1], R);
 }
 
 
 static void proc_cmd_uc(rtfobj *R) {
-    R->attr->uc = (size_t)get_num_arg(R->cmd);
+    R->attr->uc = (size_t)get_num_arg(&R->cmd[1]);
 }
 
 
 static void proc_cmd_u(rtfobj *R) {
     char utf8[5];
-    encode_utf8(get_num_arg(R->cmd), utf8);
+    encode_utf8(get_num_arg(&R->cmd[1]), utf8);
     add_string_to_txt(utf8, R);
     R->attr->uc0i = R->attr->uc;
 }
@@ -455,7 +415,7 @@ static void proc_cmd_apostrophe(rtfobj *R) {
         R->attr->uc0i--;
     } else {
         // TODO: CONVERT FROM CODE PAGE TO UNICODE (SEE HEADER TODO)
-        encode_utf8(get_hex_arg(R->cmd), utf8);
+        encode_utf8(get_hex_arg(&R->cmd[1]), utf8);
         add_string_to_txt(utf8, R);
     }
 }
@@ -511,9 +471,9 @@ static void proc_cmd_unknown(rtfobj *R) {
 
 static void add_to_raw(int c, rtfobj *R) {
     if (R->ri+1 >= R->rawz) {
-        LOG("Exhausted raw buffer.");
-        LOG("R->ri = %zu. Last raw data: \'%s\'", R->ri, &R->raw[R->ri-80]);
-        LOG("No match within limits. Flushing buffers, attempting recovery");
+        DBUG("Exhausted raw buffer.");
+        DBUG("R->ri = %zu. Last raw data: \'%s\'", R->ri, &R->raw[R->ri-80]);
+        DBUG("No match within limits. Flushing buffers, attempting recovery");
         output_raw(R);
         reset_raw_buffer(R);
         reset_txt_buffer(R);
@@ -523,10 +483,25 @@ static void add_to_raw(int c, rtfobj *R) {
 }
 
 static void add_to_txt(int c, rtfobj *R) {
+    // Output the raw buffer when we FIRST add text to the text buffer.
+    // This ONLY works if we always add to the text buffer before we add
+    // to the text buffer... Meeting this requirement necessitated 
+    // reworking the command_dispatch() code so that read_command() 
+    // doesn't add the command text to the raw buffer -- only at the end
+    // of proc_command() (including potentially adding text to R->txt)
+    // do we add to the raw buffer.  This ensures that R->raw doesn't
+    // contain anything we need for R->txt when R->txt is first added
+    // to... but it is somewhat brittle.  There is probably a better way
+    // to refactor this, probably by tracking the beginning and ending
+    // index into raw for each token that adds text to R->txt. 
+    if (R->ri > 0 && R->ti == 0) {
+        output_raw(R);
+        reset_raw_buffer(R);
+    }
     if (R->ti+1 >= R->txtz) {
-        LOG("Exhausted txt buffer.");
-        LOG("R->ti = %zu. Last txt data: \'%s\'", R->ti, &R->txt[R->ti-80]);
-        LOG("No match within limits. Flushing buffers, attempting recovery");
+        DBUG("Exhausted txt buffer.");
+        DBUG("R->ti = %zu. Last txt data: \'%s\'", R->ti, &R->txt[R->ti-80]);
+        DBUG("No match within limits. Flushing buffers, attempting recovery");
         output_raw(R);
         reset_raw_buffer(R);
         reset_txt_buffer(R);
@@ -540,9 +515,9 @@ static void add_to_txt(int c, rtfobj *R) {
 
 static void add_to_cmd(int c, rtfobj *R) {
     if (R->ci+1 >= R->cmdz) {
-        LOG("Exhausted cmd buffer.");
-        LOG("R->ci = %zu. Last cmd data: \'%s\'", R->ci, &R->cmd[R->ci-80]);
-        LOG("No match within limits. Flushing buffers, attempting recovery");
+        DBUG("Exhausted cmd buffer.");
+        DBUG("R->ci = %zu. Last cmd data: \'%s\'", R->ci, &R->cmd[R->ci-80]);
+        DBUG("No match within limits. Flushing buffers, attempting recovery");
         output_raw(R);
         reset_raw_buffer(R);
         reset_txt_buffer(R);
@@ -565,35 +540,26 @@ static void add_string_to_txt(const char *s, rtfobj *R) {
 }
 
 
-
-
-static void reset_buffers(rtfobj *R) {
-    reset_raw_buffer(R);
-    reset_txt_buffer(R);
-    reset_cmd_buffer(R);
-}
-
-
 static void reset_raw_buffer(rtfobj *R) {
     if (R->ri > 0) {
+        memzero(R->raw, R->ri);
         R->ri = 0UL;
-        memzero(R->raw, R->rawz);
     }
 }
 
 
 static void reset_txt_buffer(rtfobj *R) {
     if (R->ti > 0) {
+        memzero(R->txt, R->ti);
         R->ti = 0UL;
-        memzero(R->txt, R->txtz);
     }
 }
 
 
 static void reset_cmd_buffer(rtfobj *R) {
     if (R->ci > 0) {
+        memzero(R->cmd, R->ci);
         R->ci = 0UL;
-        memzero(R->cmd, R->cmdz);
     }
 }
 

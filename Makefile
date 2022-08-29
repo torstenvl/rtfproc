@@ -9,35 +9,35 @@ FAIL="\342\235\214\033[1;31m FAILED!!!\033[m\n"
 
 CC = cc
 
-RELFLAGS = -std=c2x -Oz
+RELFLAGS = -std=c2x -O3
 DBGFLAGS = -std=c2x -O0 -gfull
 STRFLAGS = -W -Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wreturn-type -Wcast-qual -Wswitch -Wshadow -Wcast-align -Wwrite-strings -Wmisleading-indentation -Wno-bitwise-op-parentheses -Wno-unused-function
 XSTRFLAGS = -Wunused-parameter -Wchar-subscripts -Winline -Wnested-externs -Wredundant-decls
 XXSTRFLAGS = -Weverything -Wno-padded -Wno-poison-system-directories -Wno-gnu-binary-literal
 
 .PHONY: all
-all: debug
+all: xtraxtrastrict
 
 .PHONY: release
 release: $(SRC) $(HDR)
-	$(CC) $(RELFLAGS) $(SRC) -o $(EXE)
+	@$(CC) $(RELFLAGS) $(SRC) -o $(EXE)
 	strip $(EXE)
 
 .PHONY: debug
 debug: $(SRC) $(HDR)
-	$(CC) $(DBGFLAGS) $(SRC) -o $(EXE)
+	@$(CC) $(DBGFLAGS) $(SRC) -o $(EXE)
 
 .PHONY: strict
 strict: $(SRC) $(HDR)
-	$(CC) $(STRFLAGS) $(DBGFLAGS) $(SRC) -o $(EXE)
+	@$(CC) $(STRFLAGS) $(DBGFLAGS) $(SRC) -o $(EXE)
 
 .PHONY: xtrastrict
 xtrastrict: $(SRC) $(HDR)
-	$(CC) $(STRFLAGS) $(XSTRFLAGS) $(DBGFLAGS) $(SRC) -o $(EXE)
+	@$(CC) $(STRFLAGS) $(XSTRFLAGS) $(DBGFLAGS) $(SRC) -o $(EXE)
 
 .PHONY: xtraxtrastrict
 xtraxtrastrict: $(SRC) $(HDR)
-	$(CC) $(STRFLAGS) $(XSTRFLAGS) $(XXSTRFLAGS) $(DBGFLAGS) $(SRC) -o $(EXE)
+	@$(CC) $(STRFLAGS) $(XSTRFLAGS) $(XXSTRFLAGS) $(DBGFLAGS) $(SRC) -o $(EXE)
 
 .PHONY: test
 test: testprologue testsuite testepilogue
@@ -58,7 +58,7 @@ testsuite: testutf8 testrtfprocess
 .PHONY: testrtfprocess
 testrtfprocess:
 	@$(CC) $(STRFLAGS) $(XSTRFLAGS) $(XXSTRFLAGS) $(SRC) -o $(EXE)
-	@printf "%-30s" "Testing rtfprocess... "
+	@printf "%-25s" "Testing rtfprocess... "
 	@./rtfsed < TEST/rtfprocess-input.rtf > TEST/rtfprocess-output.rtf
 	@diff TEST/rtfprocess-output.rtf TEST/rtfprocess-correct.rtf > /dev/null \
 		&& printf $(SUCC) && rm rtfsed TEST/rtfprocess-output.rtf || printf $(FAIL)
@@ -66,7 +66,7 @@ testrtfprocess:
 .PHONY: testutf8
 testutf8:
 	@$(CC) STATIC/*.c TEST/utf8test.c -o TEST/utf8test
-	@printf "%-30s" "Testing utf8test... "
+	@printf "%-25s" "Testing utf8test... "
 	@./TEST/utf8test \
 		&& printf $(SUCC) && rm TEST/utf8test || printf $(FAIL)
 
