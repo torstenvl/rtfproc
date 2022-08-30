@@ -74,7 +74,7 @@ testepilogue:
 	@echo
 
 .PHONY: testsuite
-testsuite: testutf8 testrtfprocess
+testsuite: testutf8 testcpgtou testrtfprocess
 
 .PHONY: testrtfprocess
 testrtfprocess:
@@ -90,6 +90,30 @@ testutf8:
 	@printf "%-25s" "Testing utf8test... "
 	@./TEST/utf8test \
 		&& printf $(SUCC) && rm TEST/utf8test || printf $(FAIL)
+
+.PHONY: testcpgtou
+testcpgtou:
+	@$(CC) $(STR_FLG) $(VSTR_FLG) $(XSTR_FLG) STATIC/*.c TEST/cpgtoutest.c -o TEST/cpgtoutest
+	@printf "%-25s" "Testing cpgtoutest... "
+	@./TEST/cpgtoutest \
+		&& printf $(SUCC) && rm TEST/cpgtoutest || printf $(FAIL)
+
+
+.PHONY: speedtest
+speedtest:
+	@$(CC) $(REL_FLG) $(SRC) -o $(EXE)
+	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@rm -fr rtfsed TESET/bigfile-output.rtf
+
 
 .PHONY: clean
 clean:

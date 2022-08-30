@@ -4516,14 +4516,13 @@ static int32_t cpgtou(cpg_t cpg, uint8_t cpt, uint8_t *xtra, const int32_t **mul
                 lo = lo - 0x40;
                 if ((hi > 59) || (lo > 188)) { // Sequence error, try recovery
                     r = (c < 128) ? c : CPG_932_TBL[c-128];
-                    *xtra = (r == cpDBSQ) ? c : 0;
                 } else {
                     r = SJIS_932_TBL[hi][lo];
                     if (r == cpNONE) { // Sequence error, try recovery
                         r = (c < 128) ? c : CPG_932_TBL[c-128];
-                        *xtra = (r == cpDBSQ) ? c : 0;
                     } 
                 }
+                *xtra = (r == cpDBSQ) ? c : 0;
             }
             break;
         case CPG_950:
@@ -4537,10 +4536,8 @@ static int32_t cpgtou(cpg_t cpg, uint8_t cpt, uint8_t *xtra, const int32_t **mul
                 // Try recovery if there's a sequence error
                 if (hi<0xA1 || hi>0xF9) {
                     r = (c<128) ? c : (0xA1<=c && c<=0xF9) ? cpDBSQ : cpNONE;
-                    *xtra = (r == cpDBSQ) ? c : 0;
                 } else if (lo<0x40 || lo>0xFE || (0x80 <= lo && lo <= 0x9F)) {
                     r = (c<128) ? c : (0xA1<=c && c<=0xF9) ? cpDBSQ : cpNONE;
-                    *xtra = (r == cpDBSQ) ? c : 0;
                 }
                 // Otherwise get the double-byte mapping
                 else {    
@@ -4549,6 +4546,7 @@ static int32_t cpgtou(cpg_t cpg, uint8_t cpt, uint8_t *xtra, const int32_t **mul
                     if (lo >= 0x40) lo = lo - 0x20;
                     r = QUWEIBIG5[hi][lo];                 
                 }
+                *xtra = (r == cpDBSQ) ? c : 0;
             }
             break;
         case CPG_10001:
@@ -4563,12 +4561,10 @@ static int32_t cpgtou(cpg_t cpg, uint8_t cpt, uint8_t *xtra, const int32_t **mul
                 lo = lo - 0x40;
                 if ((hi > 59) || (lo > 188)) { // Sequence error, try recovery
                     r = (c < 128) ? c : CPG_10001_TBL[c-128];
-                    *xtra = (r == cpDBSQ) ? c : 0;
                 } else {
                     r = SJIS_APL_TBL[hi][lo]; 
                     if (r == cpNONE) { // Sequence error, try recovery
                         r = (c < 128) ? c : CPG_10001_TBL[c-128];
-                        *xtra = (r == cpDBSQ) ? c : 0;
                     } else if (r == cpMULT) {
                         switch ((*xtra << 8) | cpt) {
                             case 0x87FB:    *mult = cpm10001_87FB;    break;
@@ -4589,6 +4585,7 @@ static int32_t cpgtou(cpg_t cpg, uint8_t cpt, uint8_t *xtra, const int32_t **mul
                         }
                     }
                 }
+                *xtra = (r == cpDBSQ) ? c : 0;
             }
             break;
         case CPG_10005:   

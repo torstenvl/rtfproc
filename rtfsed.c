@@ -200,14 +200,16 @@ void rtfreplace(rtfobj *R) {
             default:            dispatch_text(c, R);       break;
         }
 
-        switch (pattern_match(R)) {
-            case PARTIAL:        /* Keep reading */        break;
-            case MATCH:          output_match(R);
-                                 reset_raw_buffer(R);
-                                 reset_txt_buffer(R);      break;
-            case NOMATCH:        output_raw(R);
-                                 reset_raw_buffer(R);
-                                 reset_txt_buffer(R);      break;
+        if (R->ti>0 && R->attr && (R->attr->notxt == false)) {
+            switch (pattern_match(R)) {
+                case PARTIAL:        /* Keep reading */        break;
+                case MATCH:          output_match(R);
+                                     reset_raw_buffer(R);
+                                     reset_txt_buffer(R);      break;
+                case NOMATCH:        output_raw(R);
+                                     reset_raw_buffer(R);
+                                     reset_txt_buffer(R);      break;
+            }
         }
         
         if (R->fatalerr)  {  LOG("Encountered a fatal error");  return;  }
@@ -220,20 +222,16 @@ void rtfreplace(rtfobj *R) {
 
 
 
-//////////////////////////////////////////////////////////////////////////////
-////                                                                      ////
-////                         DISPATCH FUNCTIONS                           ////
-////                                                                      ////
-////     Deal with different categories of action from the main loop      ////
-////                                                                      ////
-//////////////////////////////////////////////////////////////////////////////
-
+/*-------------------------------------------------------------------------*\
+|                                                                           |
+|                            DISPATCH FUNCTIONS                             |
+|                                                                           |
+\*-------------------------------------------------------------------------*/
 static void dispatch_scope(int c, rtfobj *R) {
     add_to_raw(c, R);
     if      (c == '{')  push_attr(R);
     else if (c == '}')  pop_attr(R);
 }
-
 
 static void dispatch_command(rtfobj *R) {
     read_command(R);
@@ -251,7 +249,6 @@ static void dispatch_command(rtfobj *R) {
 
 }
 
-
 static void dispatch_text(int c, rtfobj *R) {
     // Ignore newlines and carriage returns in RTF code. Consider tabs and
     // vertical tabs to be interchangeable with spaces. Treat everything else
@@ -268,16 +265,11 @@ static void dispatch_text(int c, rtfobj *R) {
 
 
 
-//////////////////////////////////////////////////////////////////////////////
-////                                                                      ////
-////                       PATTERN MATCH FUNCTION                         ////
-////                                                                      ////
-////     Check to see whether we have a match for any of the tokens in    ////
-////     our replacement dictionary.  If NOMATCH, then we should only     ////
-////     invalidate as much as we are SURE could not be part of some      ////
-////     other match. Cf. KMP/Boyer-Moore.                                ////
-////                                                                      ////
-//////////////////////////////////////////////////////////////////////////////
+/*--------------------------------------------------------------------------*\
+|                                                                            |
+|                          PATTERN MATCH FUNCTION                            |
+|                                                                            |
+\*--------------------------------------------------------------------------*/
 static int pattern_match(rtfobj *R) {
     size_t i, j;
 
