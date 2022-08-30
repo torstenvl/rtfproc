@@ -36,6 +36,13 @@
 //             Iterate through file multiple times, using intermediate temp
 //             files, and only doing one replacement at a time.
 //
+//             Less-brute force
+//             ----------------
+//             Upon failing a match, ungetc() all of the raw buffer, set 
+//             skipbytes/uc0i to 1 to skip one byte in the 'output' but
+//             not in the raw RTF code, reset the buffers, and get ready
+//             to fuckin' Rock 'n' Roll. 
+//
 //             More clever
 //             -----------
 //             Use a size_t txtrawmap[] with the same no. of elements as
@@ -94,13 +101,13 @@ static void reset_txt_buffer(rtfobj *R);
 static void reset_cmd_buffer(rtfobj *R);
 
 static void encode_utf8(int32_t c, char utf8[5]);
-static void memzero(void *const p, const size_t n);
 static int32_t get_num_arg(const char *s);
 static int32_t get_hex_arg(const char *s);
 
 // Macros
 // #define RTFDEBUG
 #define REGEX_MATCH(x, y)    (re_match(y, x, NULL) > -1)
+#define memzero(x, y)        (memset(x, 0, y))
 #ifdef RTFDEBUG
     #define DBUG(...) (LOG(__VA_ARGS__))
 #else
@@ -272,14 +279,12 @@ static void dispatch_text(int c, rtfobj *R) {
 ////                                                                      ////
 //////////////////////////////////////////////////////////////////////////////
 static int pattern_match(rtfobj *R) {
-    size_t i;
+    size_t i, j;
 
     // Check for complete matches
     for (i = 0; i < R->srchz; i++) {
-        if (!strcmp(R->txt, R->srch_key[i])) {
-            R->srch_match = i;
-            return MATCH;
-        }
+        for (j = 0; R->txt[j] != '\0' && R->txt[j] == R->srch_key[i][j]; j++); 
+        if (R->txt[j] == R->srch_key[i][j]) { R->srch_match = i; return MATCH; }
     }
 
     // Check for partial matches at current offset. This includes an empty
@@ -288,9 +293,8 @@ static int pattern_match(rtfobj *R) {
     // when we FIRST add to the text buffer (see below) rather than on every
     // input byte that doesn't contain text. 
     for (i = 0; i < R->srchz; i++) {
-        if (!strncmp(R->txt, R->srch_key[i], R->ti)) {
-            return PARTIAL;
-        }
+        for (j = 0; j < R->ti && R->txt[j] == R->srch_key[i][j]; j++); 
+        if (j == R->ti) { return PARTIAL; }
     }
 
     return NOMATCH;
@@ -541,26 +545,20 @@ static void add_string_to_txt(const char *s, rtfobj *R) {
 
 
 static void reset_raw_buffer(rtfobj *R) {
-    if (R->ri > 0) {
-        memzero(R->raw, R->ri);
-        R->ri = 0UL;
-    }
+    memzero(R->raw, R->ri);
+    R->ri = 0UL;
 }
 
 
 static void reset_txt_buffer(rtfobj *R) {
-    if (R->ti > 0) {
-        memzero(R->txt, R->ti);
-        R->ti = 0UL;
-    }
+    memzero(R->txt, R->ti);
+    R->ti = 0UL;
 }
 
 
 static void reset_cmd_buffer(rtfobj *R) {
-    if (R->ci > 0) {
-        memzero(R->cmd, R->ci);
-        R->ci = 0UL;
-    }
+    memzero(R->cmd, R->ci);
+    R->ci = 0UL;
 }
 
 
@@ -687,14 +685,6 @@ static void encode_utf8(int32_t c, char utf8[5]) {
         u[4]= '\0';
     } else {
         u[0]= '\0';
-    }
-}
-
-
-static void memzero(void *const p, const size_t n) {
-    volatile unsigned char *volatile p_ = (volatile unsigned char *volatile) p;
-    for (; p_  <  (volatile unsigned char *volatile) p + n; p_++) {
-        *p_ = 0U;
     }
 }
 

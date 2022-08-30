@@ -1,3 +1,30 @@
+ifeq ($(OS),Windows_NT)
+else
+    UNAME_S := $(shell uname -s)
+    ifeq ($(UNAME_S),Linux)
+        REL_FLG = -std=c2x -Os
+        DBG_FLG = -std=c2x -O0 -pg
+        STR_FLG = -W -Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith \
+		          -Wreturn-type -Wcast-qual -Wswitch -Wshadow -Wcast-align -Wwrite-strings \
+				  -Wmisleading-indentation 
+        VSTR_FLG = -Wunused-parameter -Wchar-subscripts -Winline -Wnested-externs -Wredundant-decls
+        XSTR_FLG = -Wextra 
+    endif
+    ifeq ($(UNAME_S),Darwin)
+        REL_FLG  =  -std=c2x -Oz
+        DBG_FLG  =  -std=c2x -O0 -gfull
+        STR_FLG  =  -W -Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith \
+		            -Wreturn-type -Wcast-qual -Wswitch -Wshadow -Wcast-align -Wwrite-strings \
+				    -Wmisleading-indentation -Wno-bitwise-op-parentheses -Wno-unused-function
+        VSTR_FLG =  -Wunused-parameter -Wchar-subscripts -Winline -Wnested-externs -Wredundant-decls
+        XSTR_FLG =  -Weverything -Wno-gnu-binary-literal -Wno-poison-system-directories \
+		            -Wno-padded -Wno-c99-compat
+    endif
+endif
+
+
+
+
 SHELL:=/bin/bash
 
 EXE=rtfsed
@@ -9,35 +36,29 @@ FAIL="\342\235\214\033[1;31m FAILED!!!\033[m\n"
 
 CC = cc
 
-RELFLAGS = -std=c2x -O3
-DBGFLAGS = -std=c2x -O0 -gfull
-STRFLAGS = -W -Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wreturn-type -Wcast-qual -Wswitch -Wshadow -Wcast-align -Wwrite-strings -Wmisleading-indentation -Wno-bitwise-op-parentheses -Wno-unused-function
-XSTRFLAGS = -Wunused-parameter -Wchar-subscripts -Winline -Wnested-externs -Wredundant-decls
-XXSTRFLAGS = -Weverything -Wno-padded -Wno-poison-system-directories -Wno-gnu-binary-literal
-
 .PHONY: all
-all: xtraxtrastrict
+all: xtrastrict
 
 .PHONY: release
 release: $(SRC) $(HDR)
-	@$(CC) $(RELFLAGS) $(SRC) -o $(EXE)
+	@$(CC) $(REL_FLG) $(SRC) -o $(EXE)
 	strip $(EXE)
 
 .PHONY: debug
 debug: $(SRC) $(HDR)
-	@$(CC) $(DBGFLAGS) $(SRC) -o $(EXE)
+	@$(CC) $(DBG_FLG) $(SRC) -o $(EXE)
 
 .PHONY: strict
 strict: $(SRC) $(HDR)
-	@$(CC) $(STRFLAGS) $(DBGFLAGS) $(SRC) -o $(EXE)
+	@$(CC) $(STR_FLG) $(DBG_FLG) $(SRC) -o $(EXE)
+
+.PHONY: verystrict
+verystrict: $(SRC) $(HDR)
+	@$(CC) $(STR_FLG) $(VSTR_FLG) $(DBG_FLG) $(SRC) -o $(EXE)
 
 .PHONY: xtrastrict
 xtrastrict: $(SRC) $(HDR)
-	@$(CC) $(STRFLAGS) $(XSTRFLAGS) $(DBGFLAGS) $(SRC) -o $(EXE)
-
-.PHONY: xtraxtrastrict
-xtraxtrastrict: $(SRC) $(HDR)
-	@$(CC) $(STRFLAGS) $(XSTRFLAGS) $(XXSTRFLAGS) $(DBGFLAGS) $(SRC) -o $(EXE)
+	@$(CC) $(STR_FLG) $(VSTR_FLG) $(XSTR_FLG) $(DBG_FLG) $(SRC) -o $(EXE)
 
 .PHONY: test
 test: testprologue testsuite testepilogue
@@ -57,7 +78,7 @@ testsuite: testutf8 testrtfprocess
 
 .PHONY: testrtfprocess
 testrtfprocess:
-	@$(CC) $(STRFLAGS) $(XSTRFLAGS) $(XXSTRFLAGS) $(SRC) -o $(EXE)
+	@$(CC) $(STR_FLG) $(VSTR_FLG) $(XSTR_FLG) $(SRC) -o $(EXE)
 	@printf "%-25s" "Testing rtfprocess... "
 	@./rtfsed < TEST/rtfprocess-input.rtf > TEST/rtfprocess-output.rtf
 	@diff TEST/rtfprocess-output.rtf TEST/rtfprocess-correct.rtf > /dev/null \
@@ -65,7 +86,7 @@ testrtfprocess:
 
 .PHONY: testutf8
 testutf8:
-	@$(CC) STATIC/*.c TEST/utf8test.c -o TEST/utf8test
+	@$(CC) $(STR_FLG) $(VSTR_FLG) $(XSTR_FLG) STATIC/*.c TEST/utf8test.c -o TEST/utf8test
 	@printf "%-25s" "Testing utf8test... "
 	@./TEST/utf8test \
 		&& printf $(SUCC) && rm TEST/utf8test || printf $(FAIL)
@@ -77,4 +98,5 @@ clean:
 	@rm -Rf Info.plist TEST/Info.plist
 	@rm -Rf TEST/rtfprocess-output.rtf
 	@rm -Rf TEST/utf8test
+	@rm -Rf TEST/bigfile-output.rtf
 	@echo Repository cleaned
