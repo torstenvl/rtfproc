@@ -6,7 +6,7 @@ else
         DBG_FLG = -std=c2x -O0 -pg
         STR_FLG = -W -Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith \
 		          -Wreturn-type -Wcast-qual -Wswitch -Wshadow -Wcast-align -Wwrite-strings \
-				  -Wmisleading-indentation 
+				  -Wmisleading-indentation -Wno-parentheses -Wno-unused-function
         VSTR_FLG = -Wunused-parameter -Wchar-subscripts -Winline -Wnested-externs -Wredundant-decls
         XSTR_FLG = -Wextra 
     endif
