@@ -6,7 +6,8 @@
 #include "../rtfsed.c"
 
 #define ENCOD(x,y) (encode_utf8(y,x))
-#define CHECK(x,y) (assert(!strcmp(x,y)))
+#define CHECK(x,y) (assert(STREQ(x,y)))
+#define STREQ(x,y) (!strcmp(x,y))
 
 int main(void) {
     char s[5];
@@ -25,6 +26,29 @@ int main(void) {
 
     ENCOD(s, 0x2B8B8);
     CHECK(s, u8"𫢸");
+
+    ENCOD(s, 0x0000);
+    CHECK(s, u8"\0");
+
+    ENCOD(s, (0 - 0x7FFFFFFF));
+    if (!STREQ(s, u8"\0")) {
+        fprintf(stderr, "Strings not equal! ");
+        fprintf(stderr, "s is { ");
+        for (size_t i = 0; s[i] != 0; i++) fprintf(stderr, "%x, ", s[i]);
+        fprintf(stderr, "%x }\n", 0);
+        fprintf(stderr, "                         ");
+        exit(1);
+    }
+
+    ENCOD(s, (int32_t)0xFFFFFFFF);
+    if (!STREQ(s, u8"\0")) {
+        fprintf(stderr, "Strings not equal! \'%s\' =/= \'%s\'\n", s, u8"\0");
+        fprintf(stderr, "s is { ");
+        for (size_t i = 0; s[i] != 0; i++) fprintf(stderr, "%x, ", s[i]);
+        fprintf(stderr, "%x }\n", 0);
+        fprintf(stderr, "                         ");
+        exit(1);
+    }
 
     return 0;
 }

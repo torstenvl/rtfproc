@@ -296,15 +296,11 @@ static int pattern_match(rtfobj *R) {
 
 
 
-//////////////////////////////////////////////////////////////////////////////
-////                                                                      ////
-////                  COMMAND DISPATCH HELPER FUNCTIONS                   ////
-////                                                                      ////
-////     Read commands and process a limited subset of them (most are     ////
-////     not needed for the purposes of simple search-and-replace.        ////
-////                                                                      ////
-//////////////////////////////////////////////////////////////////////////////
-
+/*--------------------------------------------------------------------------*\
+|                                                                            |
+|                     COMMAND DISPATCH HELPER FUNCTIONS                      |
+|                                                                            |
+\*--------------------------------------------------------------------------*/
 static void read_command(rtfobj *R) {
     int c;
 
@@ -363,22 +359,25 @@ static void proc_command(rtfobj *R) {
     char *cmd = &R->cmd[1];
 
     if (0); 
-    else if (REGEX_MATCH(cmd, "^\\$"))                         proc_cmd_escapedliteral(R);
-    else if (REGEX_MATCH(cmd, "^{$"))                          proc_cmd_escapedliteral(R);
-    else if (REGEX_MATCH(cmd, "^}$"))                          proc_cmd_escapedliteral(R);
-    else if (REGEX_MATCH(cmd, "^uc[0-9]+ ?$"))                 proc_cmd_uc(R);
-    else if (REGEX_MATCH(cmd, "^u-?[0-9]+ ?$"))                proc_cmd_u(R);
-    else if (REGEX_MATCH(cmd, "^\'[0-9A-Fa-f][0-9A-Fa-f] ?$")) proc_cmd_apostrophe(R);
-    else if (REGEX_MATCH(cmd, "^fonttbl ?$"))                  proc_cmd_fonttbl(R);
-    else if (REGEX_MATCH(cmd, "^f[0-9]+ ?$"))                  proc_cmd_f(R);
-    else if (REGEX_MATCH(cmd, "^pict ?$"))                     proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(cmd, "^colortbl ?$"))                 proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(cmd, "^stylesheet ?$"))               proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(cmd, "^operator ?$"))                 proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(cmd, "^bin ?$"))                      proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(cmd, "^par ?$"))                      proc_cmd_newpar(R);
-    else if (REGEX_MATCH(cmd, "^line ?$"))                     proc_cmd_newline(R);
-    else if (1)                                                proc_cmd_unknown(R);
+    else if (REGEX_MATCH(cmd, "^\\$"))            proc_cmd_escapedliteral(R);
+    else if (REGEX_MATCH(cmd, "^{$"))             proc_cmd_escapedliteral(R);
+    else if (REGEX_MATCH(cmd, "^}$"))             proc_cmd_escapedliteral(R);
+    else if (REGEX_MATCH(cmd, "^uc[0-9]+ ?$"))    proc_cmd_uc(R);
+    else if (REGEX_MATCH(cmd, "^u-?[0-9]+ ?$"))   proc_cmd_u(R);
+    else if (REGEX_MATCH(cmd, 
+             "^\'[0-9A-Fa-f][0-9A-Fa-f] ?$"))     proc_cmd_apostrophe(R);
+    else if (REGEX_MATCH(cmd, "^fonttbl ?$"))     proc_cmd_fonttbl(R);
+    else if (REGEX_MATCH(cmd, "^f[0-9]+ ?$"))     proc_cmd_f(R);
+    else if (REGEX_MATCH(cmd, "^pict ?$"))        proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(cmd, "^colortbl ?$"))    proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(cmd, "^stylesheet ?$"))  proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(cmd, "^operator ?$"))    proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(cmd, "^bin ?$"))         proc_cmd_shuntblock(R);
+    else if (REGEX_MATCH(cmd, "^par ?$"))         proc_cmd_newpar(R);
+    else if (REGEX_MATCH(cmd, "^line ?$"))        proc_cmd_newline(R);
+    else if (REGEX_MATCH(cmd, 
+             "^[\r\n][\r\n]? ?$"))                proc_cmd_newline(R);
+    else if (1)                                   proc_cmd_unknown(R);
     
     // If the command is \* then the entire block is optional, but... if we 
     // then recognize the command, revoke that 'optional' status.
@@ -654,28 +653,32 @@ static void pop_attr(rtfobj *R) {
 
 static void encode_utf8(int32_t c, char utf8[5]) {
     char *u = utf8;
+    if (c < 0) {
+        u[0]= '\0';
+    } else 
     if (c < 0b000000000000010000000) { // Up to 7 bits
         u[0]= (char)(c>>0  & 0b01111111 | 0b00000000);  // 7 bits –> 0xxxxxxx
         u[1]= '\0';
-    } else
-    if (c < 0b000000000100000000000) { // Up to 11 bits
+    } 
+    else if (c < 0b000000000100000000000) { // Up to 11 bits
         u[0]= (char)(c>>6  & 0b00011111 | 0b11000000);  // 5 bits –> 110xxxxx
         u[1]= (char)(c>>0  & 0b00111111 | 0b10000000);  // 6 bits –> 10xxxxxx
         u[2]= '\0';
-    } else
-    if (c < 0b000010000000000000000) { // Up to 16 bits
+    } 
+    else if (c < 0b000010000000000000000) { // Up to 16 bits
         u[0]= (char)(c>>12 & 0b00001111 | 0b11100000);  // 4 bits –> 1110xxxx
         u[1]= (char)(c>>6  & 0b00111111 | 0b10000000);  // 6 bits –> 10xxxxxx
         u[2]= (char)(c>>0  & 0b00111111 | 0b10000000);  // 6 bits –> 10xxxxxx
         u[3]= '\0';
-    } else
-    if (c < 0b100010000000000000000) { // Up to 21 bits
+    } 
+    else if (c < 0b100010000000000000000) { // Up to 21 bits
         u[0]= (char)(c>>18 & 0b00000111 | 0b11110000);  // 3 bits –> 11110xxx
         u[1]= (char)(c>>12 & 0b00111111 | 0b10000000);  // 6 bits –> 10xxxxxx
         u[2]= (char)(c>>6  & 0b00111111 | 0b10000000);  // 6 bits –> 10xxxxxx
         u[3]= (char)(c>>0  & 0b00111111 | 0b10000000);  // 6 bits –> 10xxxxxx
         u[4]= '\0';
-    } else {
+    } 
+    else {
         u[0]= '\0';
     }
 }

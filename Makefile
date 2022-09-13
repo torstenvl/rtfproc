@@ -2,8 +2,8 @@ ifeq ($(OS),Windows_NT)
 else
     UNAME_S := $(shell uname -s)
     ifeq ($(UNAME_S),Linux)
-        REL_FLG = -std=c2x -Os
-        DBG_FLG = -std=c2x -O0 -pg
+        REL_FLG = -std=c2x -funsigned-char -Os
+        DBG_FLG = -std=c2x -funsigned-char -O0 -pg
         STR_FLG = -W -Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith \
 		          -Wreturn-type -Wcast-qual -Wswitch -Wshadow -Wcast-align -Wwrite-strings \
 				  -Wmisleading-indentation -Wno-parentheses -Wno-unused-function -Wno-unused-value
@@ -11,8 +11,8 @@ else
         XSTR_FLG = -Wextra 
     endif
     ifeq ($(UNAME_S),Darwin)
-        REL_FLG  =  -std=c2x -Oz
-        DBG_FLG  =  -std=c2x -O0 -gfull
+        REL_FLG  =  -std=c2x -funsigned-char -Oz
+        DBG_FLG  =  -std=c2x -funsigned-char -O0 -gfull
         STR_FLG  =  -W -Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith \
 		            -Wreturn-type -Wcast-qual -Wswitch -Wshadow -Wcast-align -Wwrite-strings \
 				    -Wmisleading-indentation -Wno-bitwise-op-parentheses -Wno-unused-function
