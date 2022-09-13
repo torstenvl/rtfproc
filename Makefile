@@ -112,7 +112,7 @@ speedtest:
 	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
 	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
 	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@rm -fr rtfsed TESET/bigfile-output.rtf
+	@rm -fr rtfsed TEST/bigfile-output.rtf
 
 
 .PHONY: clean
