@@ -1,0 +1,3 @@
+[submodule "STATIC/cpgtou"]
+	path = STATIC/cpgtou
+	url = https://github.com/torstenvl/cpgtou

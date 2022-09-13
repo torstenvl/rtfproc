@@ -3,7 +3,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include "rtfsed.h"
-#include "STATIC/cpgtou.h"
+#include "STATIC/cpgtou/cpgtou.h"
 
 int main(int argc, char **argv) {
     rtfobj *R;

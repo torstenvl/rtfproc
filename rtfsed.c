@@ -67,8 +67,8 @@
 #include <ctype.h>
 #include <errno.h>
 #include "rtfsed.h"
-#include "STATIC/re.h"
-#include "STATIC/cpgtou.h"
+#include "STATIC/regex/re.h"
+#include "STATIC/cpgtou/cpgtou.h"
 
 // Internal function declarations
 static void dispatch_scope(int c, rtfobj *R);

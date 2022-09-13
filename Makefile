@@ -28,8 +28,8 @@ endif
 SHELL:=/bin/bash
 
 EXE=rtfsed
-HDR=STATIC/*.h *.h 
-SRC=STATIC/*.c *.c
+HDR=*.h STATIC/*/*.h 
+SRC=*.c STATIC/*/*.c
 
 SUCC="\342\234\205 SUCCESS\n"
 FAIL="\342\235\214\033[1;31m FAILED!!!\033[m\n"
@@ -86,14 +86,14 @@ testrtfprocess:
 
 .PHONY: testutf8
 testutf8:
-	@$(CC) $(STR_FLG) $(VSTR_FLG) $(XSTR_FLG) STATIC/*.c TEST/utf8test.c -o TEST/utf8test
+	@$(CC) $(STR_FLG) $(VSTR_FLG) $(XSTR_FLG) STATIC/regex/*.c TEST/utf8test.c -o TEST/utf8test
 	@printf "%-25s" "Testing utf8test... "
 	@./TEST/utf8test \
 		&& printf $(SUCC) && rm TEST/utf8test || printf $(FAIL)
 
 .PHONY: testcpgtou
 testcpgtou:
-	@$(CC) $(STR_FLG) $(VSTR_FLG) $(XSTR_FLG) STATIC/*.c TEST/cpgtoutest.c -o TEST/cpgtoutest
+	@$(CC) $(STR_FLG) $(VSTR_FLG) $(XSTR_FLG) STATIC/regex/*.c TEST/cpgtoutest.c -o TEST/cpgtoutest
 	@printf "%-25s" "Testing cpgtoutest... "
 	@./TEST/cpgtoutest \
 		&& printf $(SUCC) && rm TEST/cpgtoutest || printf $(FAIL)
@@ -121,6 +121,8 @@ clean:
 	@rm -Rf *.dSYM/ TEST/*.dSYM
 	@rm -Rf Info.plist TEST/Info.plist
 	@rm -Rf TEST/rtfprocess-output.rtf
-	@rm -Rf TEST/utf8test
 	@rm -Rf TEST/bigfile-output.rtf
+	@rm -Rf TEST/cpgtoutest
+	@rm -Rf TEST/utf8test
+	@rm -Rf rtfsed
 	@echo Repository cleaned
