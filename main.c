@@ -12,19 +12,20 @@
 #if defined( RTFAUTOOPEN )
 #define RTFINFILE   "TEST/rtfprocess-input.rtf"
 #define RTFOUTFILE  "TEST/rtfprocess-output.rtf"
-#if defined ( OSMAC )
+#if defined ( OS_MAC )
 #define OPENCMD     "open TEST/rtfprocess-output.rtf"
-#elif defined ( OSLINUX )
+#elif defined ( OS_LINUX )
 #define OPENCMD     "xdg-open TEST/rtfprocess-output.rtf"
-#elif defined ( OSBSD )
+#elif defined ( OS_BSD )
 #define OPENCMD     "xdg-open TEST/rtfprocess-output.rtf"
-#elif defined( OSWIN )
+#elif defined( OS_WIN )
 #define OPENCMD     "start TEST/rtfprocess-output.rtf"
 #endif
 #else
 #define RTFINFILE   ""
 #define RTFOUTFILE  ""
 #define OPENCMD     ""
+#define system(...) ((void)0)
 #endif
 
 int main(int argc, char **argv) {

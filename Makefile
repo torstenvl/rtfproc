@@ -57,7 +57,7 @@ endif
 CFLAGS    = -std=c2x -funsigned-char 
 RELEASE   = $(CFLAGS) $(O_SZ_FLAG) -DNDEBUG
 DEBUG     = $(CFLAGS) $(DBUG_FLAG)
-STRICT1   = -W -Wall -Werror -Wno-unused-function -Wno-unknown-pragmas 
+STRICT1   = -W -Wall -Werror -Wno-unused-function 
 STRICT2   = $(STRICT1) -pedantic -Wno-gnu-binary-literal                \
 			-Wstrict-prototypes -Wmissing-prototypes -Wchar-subscripts  \
 			-Wpointer-arith -Wcast-qual -Wswitch -Wshadow -Wcast-align  \
@@ -88,14 +88,17 @@ release:	$(ALLSRC)
 debug:	$(ALLSRC)
 	@$(CC)  $(SOURCE) $(DEBUG) 				-o $(EXEC)
 strict:		$(ALLSRC)
-	@$(CC)  $(SOURCE) $(DEBUG) $(STRICT1)	-o $(EXEC)
+	@$(CC)  $(SOURCE) $(RELEASE) $(STRICT1)	-o $(EXEC)
 stricter:	$(ALLSRC)
-	@$(CC)  $(SOURCE) $(DEBUG) $(STRICT2)	-o $(EXEC)
+	@$(CC)  $(SOURCE) $(RELEASE) $(STRICT2)	-o $(EXEC)
 strictest:	$(ALLSRC)
-	@$(CC)  $(SOURCE) $(DEBUG) $(STRICT3)	-o $(EXEC)
+	@$(CC)  $(SOURCE) $(RELEASE) $(STRICT3)	-o $(EXEC)
+ULTRASTRICT:$(ALLSRC)
+	@$(CC)  $(SOURCE) $(RELEASE) $(STRICT4)	-o $(EXEC)
 demo:		$(ALLSRC)
-	@$(CC)  $(SOURCE) $(RELEASE) $(DEMO)	-o $(EXEC)
-	@strip  $(EXE)
+	@$(CC)  $(SOURCE) $(RELEASE) -DRTFAUTOOPEN	-o $(EXEC)
+	@strip  $(EXEC)
+	@./$(EXEC)
 test:		testsuiteprologue testsuite testsuiteepilogue
 testsuiteprologue:
 	@echo
