@@ -1,32 +1,47 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 #include <ctype.h>
 #include "rtfsed.h"
 #include "STATIC/cpgtou/cpgtou.h"
+#include "STATIC/utillib/utillib.h"
+
+#define VALIDSTRING(x) (strlen(x) > 0)
+
+#if defined( RTFAUTOOPEN )
+#define RTFINFILE   "TEST/rtfprocess-input.rtf"
+#define RTFOUTFILE  "TEST/rtfprocess-output.rtf"
+#if defined ( OSMAC )
+#define OPENCMD     "open TEST/rtfprocess-output.rtf"
+#elif defined ( OSLINUX )
+#define OPENCMD     "xdg-open TEST/rtfprocess-output.rtf"
+#elif defined ( OSBSD )
+#define OPENCMD     "xdg-open TEST/rtfprocess-output.rtf"
+#elif defined( OSWIN )
+#define OPENCMD     "start TEST/rtfprocess-output.rtf"
+#endif
+#else
+#define RTFINFILE   ""
+#define RTFOUTFILE  ""
+#define OPENCMD     ""
+#endif
 
 int main(int argc, char **argv) {
     rtfobj *R;
     FILE *fin = stdin;
     FILE *fout = stdout;
 
-    if (argc >= 2) {
-        fin = fopen(argv[1], "rb");
-        if (!fin) {
-            fprintf(stderr, "Could not read file \'%s\'\n", argv[1]);
-            perror("Exiting");
-            exit(EXIT_FAILURE);
-        }
+    const char *finname  = (argc>=2) ? argv[1] : RTFINFILE;
+    const char *foutname = (argc>=3) ? argv[2] : RTFOUTFILE;
+
+    if (VALIDSTRING(finname)) {
+        (fin = fopen(finname, "rb")) || DIE("Could not read file \'%s\'\n", finname);
     }
 
-    if (argc >= 3) {
-        fout = fopen(argv[2], "wb");
-        if (!fout) {
-            fprintf(stderr, "Could not write to file \'%s\'\n", argv[2]);
-            perror("Exiting");
-            exit(EXIT_FAILURE);
-        }
-    }
+    if (VALIDSTRING(foutname)) {
+        (fout = fopen(foutname, "wb")) || DIE("Could not write to file \'%s\'\n", foutname);
+    } 
 
     const char *replacements[] = {
         "«SSIC»",                    "1000",
@@ -47,5 +62,9 @@ int main(int argc, char **argv) {
     rtfreplace(R);
     delete_rtfobj(R);
 
-    exit(EXIT_SUCCESS);
+    if (VALIDSTRING(OPENCMD)) {
+        system(OPENCMD);
+    }
+
+    return 0;
 }

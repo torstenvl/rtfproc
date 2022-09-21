@@ -13,6 +13,7 @@
 #define   RAW_BUFFER_SIZE   65536  // Raw processing buffer
 #define   TXT_BUFFER_SIZE    2048  // Text processing buffer
 #define   CMD_BUFFER_SIZE    2048  // Command processing buffer
+#define   FONTTBL_SIZE        512  // Number of fonttbl entries
 
 #define   NOMATCH              -1
 #define   PARTIAL               0
@@ -20,6 +21,7 @@
 
 
 
+// ATTRIBUTE STACK ENTRY
 typedef struct rtfattr {
     size_t          uc;
     size_t          uc0i;        // Iterator from uc to 0 after \u cmd
@@ -36,7 +38,7 @@ typedef struct rtfattr {
 } rtfattr;
 
 
-
+// RTF OBJECT
 typedef struct rtfobj {
     FILE         *  fin;          // RTF file-in
     FILE         *  fout;         // RTF file-out
@@ -52,6 +54,13 @@ typedef struct rtfobj {
     char            raw[RAW_BUFFER_SIZE];
     char            txt[TXT_BUFFER_SIZE];
     char            cmd[CMD_BUFFER_SIZE];
+    size_t          txtrawmap[TXT_BUFFER_SIZE];
+
+    int32_t         highsurrogate;
+
+    size_t          fonttblz; 
+    int32_t         fonttbl_f[FONTTBL_SIZE];
+    int32_t         fonttbl_charset[FONTTBL_SIZE];
 
     size_t          srchz;        // srch & replace pairs
     size_t          srch_match; 

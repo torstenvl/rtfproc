@@ -1,3 +1,6 @@
 [submodule "STATIC/cpgtou"]
 	path = STATIC/cpgtou
 	url = https://github.com/torstenvl/cpgtou
+[submodule "STATIC/utillib"]
+	path = STATIC/utillib
+	url = https://github.com/torstenvl/utillib

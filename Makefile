@@ -1,128 +1,171 @@
+#############################################################################
+##
+##        Project-specific flags
+##
+#############################################################################
+DEMOFLAGS		= 	-DRTFAUTOOPEN
+
+
+
+
+#############################################################################
+##
+##        Operating system detection and meta-setting configuration
+##
+#############################################################################
 ifeq ($(OS),Windows_NT)
+# HOSTOS		=	windows
+# CC			=	msvcpp
+# SUCCESS		=	". OK\n"
+# FAILURE		=	"X FAILED!!!\n"
 else
-    UNAME_S := $(shell uname -s)
-    ifeq ($(UNAME_S),Linux)
-        REL_FLG = -std=c2x -funsigned-char -Os
-        DBG_FLG = -std=c2x -funsigned-char -O0 -pg
-        STR_FLG = -W -Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith \
-		          -Wreturn-type -Wcast-qual -Wswitch -Wshadow -Wcast-align -Wwrite-strings \
-				  -Wmisleading-indentation -Wno-parentheses -Wno-unused-function -Wno-unused-value
-        VSTR_FLG = -Wunused-parameter -Wchar-subscripts -Winline -Wnested-externs -Wredundant-decls
-        XSTR_FLG = -Wextra 
-    endif
-    ifeq ($(UNAME_S),Darwin)
-        REL_FLG  =  -std=c2x -funsigned-char -Oz
-        DBG_FLG  =  -std=c2x -funsigned-char -O0 -gfull
-        STR_FLG  =  -W -Wall -Werror -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith \
-		            -Wreturn-type -Wcast-qual -Wswitch -Wshadow -Wcast-align -Wwrite-strings \
-				    -Wmisleading-indentation -Wno-bitwise-op-parentheses -Wno-unused-function
-        VSTR_FLG =  -Wunused-parameter -Wchar-subscripts -Winline -Wnested-externs -Wredundant-decls
-        XSTR_FLG =  -Weverything -Wno-gnu-binary-literal -Wno-poison-system-directories \
-		            -Wno-padded -Wno-c99-compat
-    endif
+	UNAME_S := $(shell uname -s)
+	ifeq ($(UNAME_S),Linux)
+		HOSTOS		=	linux
+		CC			=	gcc
+		SUCCESS		=	"\342\234\205 OK\n"
+		FAILURE		=	"\342\235\214\033[1;31m FAILED!!!\033[m\n"
+	else ifeq ($(UNAME_S),NetBSD)
+		HOSTOS		=	 bsd
+		CC			=	 gcc
+		SUCCESS		=	"\342\234\205 OK\n"
+		FAILURE		=	 "\342\235\214\033[1;31m FAILED!!!\033[m\n"
+	else ifeq ($(UNAME_S),OpenBSD)
+		HOSTOS		=	bsd
+		CC			=	clang
+		SUCCESS		=	"\342\234\205 OK\n"
+		FAILURE		=	"\342\235\214\033[1;31m FAILED!!!\033[m\n"
+	else ifeq ($(UNAME_S),FreeBSD)
+		HOSTOS		=	bsd
+		CC			=	clang
+		SUCCESS		=	"\342\234\205 OK\n"
+		FAILURE		=	"\342\235\214\033[1;31m FAILED!!!\033[m\n"
+	else ifeq ($(UNAME_S),Darwin)
+		HOSTOS 		=	macos
+		CC			=	clang
+		SUCCESS		=	"\342\234\205 OK\n"
+		FAILURE		=	"\342\235\214\033[1;31m FAILED!!!\033[m\n"
+	endif
+endif
+
+ifeq ($(CC),clang)
+	O_SZ_FLAG	=	-Oz
+	DBUG_FLAG	=	-gfull
+	WEVERYTHING	=	-Weverything -Wno-poison-system-directories              \
+					-Wno-tautological-unsigned-char-zero-compare -Wno-padded \
+					-Wno-c++98-compat -Wno-gnu-binary-literal -Wno-c99-compat
+else ifeq ($(CC),gcc)
+	O_SZ_FLAG	=	-Os
+	DBUG_FLAG	=	-pg
+	WEVERYTHING	=	
+else ifeq ($(CC),msvcpp)
+	O_SZ_FLAG	=	/Os
+	DBUG_FLAG	=	/Zi
+	WEVERYTHING	=	
 endif
 
 
+#############################################################################
+##
+##      Basic build flags for different levels of strictness/debugging
+##
+#############################################################################
+CFLAGS    = -std=c2x -funsigned-char 
+RELEASE   = $(CFLAGS) $(O_SZ_FLAG) -O3 -DNDEBUG
+DEBUG     = $(CFLAGS) $(DBUG_FLAG) -O0
+STRICT1   = -W -Wall -Werror -Wno-unused-function -Wno-unknown-pragmas 
+STRICT2   = $(STRICT1)                                                  \
+			-Wstrict-prototypes -Wmissing-prototypes -Wchar-subscripts  \
+			-Wpointer-arith -Wcast-qual -Wswitch -Wshadow -Wcast-align  \
+			-Wreturn-type -Wwrite-strings -Winline -Wredundant-decls    \
+			-Wmisleading-indentation -Wunused-parameter -Wnested-externs 
+STRICT3   = $(STRICT2) -Wextra 
+STRICT4   = $(STRICT3) $(WEVERYTHING)
 
 
-SHELL:=/bin/bash
 
-EXE=rtfsed
-HDR=*.h STATIC/*/*.h 
-SRC=*.c STATIC/*/*.c
+EXEC	=	$(shell basename `stat -f %R .`)
+HEADERS	=	*.h STATIC/*/*.h 
+SOURCE	=	*.c STATIC/*/*.c
+ALLSRC	=   $(SOURCE) $(HEADERS)
 
-SUCC="\342\234\205 SUCCESS\n"
-FAIL="\342\235\214\033[1;31m FAILED!!!\033[m\n"
 
-CC = cc
 
-.PHONY: all
-all: xtrastrict
-
-.PHONY: release
-release: $(SRC) $(HDR)
-	@$(CC) $(REL_FLG) $(SRC) -o $(EXE)
-	strip $(EXE)
-
-.PHONY: debug
-debug: $(SRC) $(HDR)
-	@$(CC) $(DBG_FLG) $(SRC) -o $(EXE)
-
-.PHONY: strict
-strict: $(SRC) $(HDR)
-	@$(CC) $(STR_FLG) $(DBG_FLG) $(SRC) -o $(EXE)
-
-.PHONY: verystrict
-verystrict: $(SRC) $(HDR)
-	@$(CC) $(STR_FLG) $(VSTR_FLG) $(DBG_FLG) $(SRC) -o $(EXE)
-
-.PHONY: xtrastrict
-xtrastrict: $(SRC) $(HDR)
-	@$(CC) $(STR_FLG) $(VSTR_FLG) $(XSTR_FLG) $(DBG_FLG) $(SRC) -o $(EXE)
-
-.PHONY: test
-test: testprologue testsuite testepilogue
-
-.PHONY: testprologue
-testprologue:
+all:		release
+release:	$(ALLSRC)
+	@$(CC)  $(SOURCE) $(RELEASE) 			-o $(EXEC)
+	@strip  $(EXEC)
+debug:	$(ALLSRC)
+	@$(CC)  $(SOURCE) $(DEBUG) 				-o $(EXEC)
+strict:		$(ALLSRC)
+	@$(CC)  $(SOURCE) $(DEBUG) $(STRICT1)	-o $(EXEC)
+stricter:	$(ALLSRC)
+	@$(CC)  $(SOURCE) $(DEBUG) $(STRICT2)	-o $(EXEC)
+strictest:	$(ALLSRC)
+	@$(CC)  $(SOURCE) $(DEBUG) $(STRICT3)	-o $(EXEC)
+demo:		$(ALLSRC)
+	@$(CC)  $(SOURCE) $(RELEASE) $(DEMO)	-o $(EXEC)
+	@strip  $(EXE)
+test:		testsuiteprologue testsuite testsuiteepilogue
+testsuiteprologue:
 	@echo
 	@echo "RUNNING TEST SUITE"
 	@echo "------------------"
-
-.PHONY: testepilogue
-testepilogue:
+testsuite:	test_rtfprocess test_utf8test test_cpgtoutest test_speedtest
+testsuiteepilogue:
 	@echo
 
-.PHONY: testsuite
-testsuite: testutf8 testcpgtou testrtfprocess
 
-.PHONY: testrtfprocess
-testrtfprocess:
-	@$(CC) $(STR_FLG) $(VSTR_FLG) $(XSTR_FLG) $(SRC) -o $(EXE)
-	@printf "%-25s" "Testing rtfprocess... "
-	@./rtfsed < TEST/rtfprocess-input.rtf > TEST/rtfprocess-output.rtf
+
+TESTCC		=	$(CC) $(RELEASE) $(STRICT3)
+TESTSTART	=	@printf "%s %-17s%s" "Testing" $(subst test_,,$@...)
+TESTEND		=	&& printf $(SUCCESS) || printf $(FAILURE)
+TESTTGT		=	TEST/testexec
+
+
+
+test_rtfprocess: $(ALLSRC)
+	$(TESTSTART)
+	@$(TESTCC) $(SOURCE) -o $(TESTTGT)
+	@$(TESTTGT) < TEST/rtfprocess-input.rtf > TEST/rtfprocess-output.rtf
 	@diff TEST/rtfprocess-output.rtf TEST/rtfprocess-correct.rtf > /dev/null \
-		&& printf $(SUCC) && rm rtfsed TEST/rtfprocess-output.rtf || printf $(FAIL)
+	$(TESTEND)
 
-.PHONY: testutf8
-testutf8:
-	@$(CC) $(STR_FLG) $(VSTR_FLG) $(XSTR_FLG) STATIC/regex/*.c TEST/utf8test.c -o TEST/utf8test
-	@printf "%-25s" "Testing utf8test... "
-	@./TEST/utf8test \
-		&& printf $(SUCC) && rm TEST/utf8test || printf $(FAIL)
+test_utf8test: STATIC/regex/*.c TEST/utf8test.c
+	$(TESTSTART)
+	@$(TESTCC) STATIC/regex/*.c TEST/utf8test.c -o $(TESTTGT)
+	@$(TESTTGT) \
+	$(TESTEND)
 
-.PHONY: testcpgtou
-testcpgtou:
-	@$(CC) $(STR_FLG) $(VSTR_FLG) $(XSTR_FLG) STATIC/regex/*.c TEST/cpgtoutest.c -o TEST/cpgtoutest
-	@printf "%-25s" "Testing cpgtoutest... "
-	@./TEST/cpgtoutest \
-		&& printf $(SUCC) && rm TEST/cpgtoutest || printf $(FAIL)
+test_cpgtoutest: STATIC/regex/*.c TEST/cpgtoutest.c
+	$(TESTSTART)
+	@$(TESTCC) STATIC/regex/*.c TEST/cpgtoutest.c -o $(TESTTGT)
+	@$(TESTTGT) \
+	$(TESTEND)
+
+test_speedtest:
+	$(TESTSTART)
+	@$(TESTCC) $(SOURCE) -o $(TESTTGT)
+	@strip $(TESTTGT)
+	@echo
+	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
+	@rm -r $(TESTTGT) TEST/bigfile-output.rtf
 
 
-.PHONY: speedtest
-speedtest:
-	@$(CC) $(REL_FLG) $(SRC) -o $(EXE)
-	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time ./rtfsed TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@rm -fr rtfsed TEST/bigfile-output.rtf
-
-
-.PHONY: clean
 clean:
-	@rm -Rf .DS_Store core *.o *~ $(EXE) 
-	@rm -Rf *.dSYM/ TEST/*.dSYM
-	@rm -Rf Info.plist TEST/Info.plist
-	@rm -Rf TEST/rtfprocess-output.rtf
-	@rm -Rf TEST/bigfile-output.rtf
-	@rm -Rf TEST/cpgtoutest
-	@rm -Rf TEST/utf8test
-	@rm -Rf rtfsed
+	@rm -Rf .DS_Store core *.o *~
+	@rm -Rf *.dSYM/ */*.dSYM
+	@rm -Rf Info.plist */Info.plist
+	@rm -Rf *-output* */*-output*
+	@rm -Rf $(TESTTGT)
+	@rm -Rf $(EXEC)
 	@echo Repository cleaned
