@@ -1,5 +1,5 @@
 #############################################################################
-##        Operating system detection and meta-setting configuration
+##          Operating system detection and OS-specific constants
 #############################################################################
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
@@ -25,25 +25,41 @@ else ifeq ($(UNAME_S),FreeBSD)
 else ifeq ($(UNAME_S),Darwin)
 	HOSTOS 		=	macos
 	CC			=	clang
+	SYSROOT		=	-isysroot \
+	                /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 	SUCCESS		=	"\342\234\205 OK\n"
 	FAILURE		=	"\342\235\214\033[1;31m FAILED!!!\033[m\n"
 else 
 	HOSTOS 		=	unknown
-	CC			=	gcc
+	CC			=	cc
 	SUCCESS		=	"\. OK\n"
 	FAILURE		=	"X FAILED!!!\n"
 endif
 
+#############################################################################
+##                          Compiler-specific flags
+#############################################################################
 ifeq ($(CC),clang)
 	O_SZ_FLAG	=	-Ofast
 	DBUG_FLAG	=	-gfull -O0
-	WEVERYTHING	=	-Weverything -Wno-poison-system-directories              \
-					-Wno-tautological-unsigned-char-zero-compare -Wno-padded \
-					-Wno-c++98-compat -Wno-gnu-binary-literal -Wno-c99-compat
+	WEVERYTHING	=	-Weverything 
+	
+#	WEXCLUDEOLD	=	-Wno-parentheses
+
+	WEXCLUDE	=	-Wno-gnu-binary-literal                    \
+					-Wno-c++98-compat                          \
+					-Wno-c99-compat                            \
+					-Wno-padded                                \
+	                -Wno-poison-system-directories
 else ifeq ($(CC),gcc)
 	O_SZ_FLAG	=	-Os
 	DBUG_FLAG	=	-pg -O0
 	WEVERYTHING	=	
+	WEXCLUDE	=	-Wno-gnu-binary-literal                    \
+					-Wno-c++98-compat                          \
+					-Wno-c99-compat                            \
+					-Wno-padded                                \
+	                -Wno-poison-system-directories
 else ifeq ($(CC),msvcpp)
 	O_SZ_FLAG	=	/Os
 	DBUG_FLAG	=	/Zi /O0
@@ -54,11 +70,11 @@ endif
 #############################################################################
 ##      Basic build flags for different levels of strictness/debugging
 #############################################################################
-CFLAGS    = -std=c2x -funsigned-char 
+CFLAGS    = $(SYSROOT) -std=c2x -funsigned-char 
 RELEASE   = $(CFLAGS) $(O_SZ_FLAG) -DNDEBUG
 DEBUG     = $(CFLAGS) $(DBUG_FLAG)
-STRICT1   = -W -Wall -Werror -Wno-unused-function 
-STRICT2   = $(STRICT1) -pedantic -Wno-gnu-binary-literal                \
+STRICT1   = -W -Wall -Werror 
+STRICT2   = $(STRICT1) -pedantic                                        \
 			-Wstrict-prototypes -Wmissing-prototypes -Wchar-subscripts  \
 			-Wpointer-arith -Wcast-qual -Wswitch -Wshadow -Wcast-align  \
 			-Wreturn-type -Wwrite-strings -Winline -Wredundant-decls    \
@@ -71,7 +87,7 @@ STRICT4   = $(STRICT3) $(WEVERYTHING)
 #############################################################################
 ##                             Target constants 
 #############################################################################
-EXEC	=	$(shell basename `stat -f %R .`)
+EXEC	=	$(shell basename `pwd`)
 HEADERS	=	*.h STATIC/*/*.h 
 SOURCE	=	*.c STATIC/*/*.c
 ALLSRC	=   $(SOURCE) $(HEADERS)
@@ -83,29 +99,30 @@ ALLSRC	=   $(SOURCE) $(HEADERS)
 #############################################################################
 all:		release
 release:	$(ALLSRC)
-	@$(CC)  $(SOURCE) $(RELEASE) 			-o $(EXEC)
-	@strip  $(EXEC)
+	@$(CC)	$(SOURCE) $(RELEASE) 						-o $(EXEC)
+	@strip	$(EXEC)
+pponly:		$(ALLSRC)
+	@$(CC)	$(SOURCE) $(RELEASE) -E						> $(EXEC)full.c
 debug:	$(ALLSRC)
-	@$(CC)  $(SOURCE) $(DEBUG) 				-o $(EXEC)
+	@$(CC)	$(SOURCE) $(DEBUG) 							-o $(EXEC)
+stackdebug:	$(ALLSRC)
+	@$(CC)	$(SOURCE) $(DEBUG) -DUL__NEED_STACKTRACE	-o $(EXEC)
 strict:		$(ALLSRC)
-	@$(CC)  $(SOURCE) $(RELEASE) $(STRICT1)	-o $(EXEC)
+	@$(CC)	$(SOURCE) $(RELEASE) $(STRICT1)	$(WEXCLUDE)	-o $(EXEC)
 stricter:	$(ALLSRC)
-	@$(CC)  $(SOURCE) $(RELEASE) $(STRICT2)	-o $(EXEC)
+	@$(CC)	$(SOURCE) $(RELEASE) $(STRICT2)	$(WEXCLUDE)	-o $(EXEC)
 strictest:	$(ALLSRC)
-	@$(CC)  $(SOURCE) $(RELEASE) $(STRICT3)	-o $(EXEC)
-ULTRASTRICT:$(ALLSRC)
-	@$(CC)  $(SOURCE) $(RELEASE) $(STRICT4)	-o $(EXEC)
+	@$(CC)	$(SOURCE) $(RELEASE) $(STRICT3)	$(WEXCLUDE)	-o $(EXEC)
+ultrastrict:$(ALLSRC)
+	@$(CC)	$(SOURCE) $(RELEASE) $(STRICT4)	$(WEXCLUDE)	-o $(EXEC)
+insane:		$(ALLSRC)
+	@$(CC)  $(SOURCE) $(RELEASE) $(STRICT4)				-o $(EXEC)
 demo:		$(ALLSRC)
-	@$(CC)  $(SOURCE) $(RELEASE) -DRTFAUTOOPEN	-o $(EXEC)
-	@strip  $(EXEC)
+	@$(CC)	$(SOURCE) $(RELEASE) -DRTFAUTOOPEN	-o $(EXEC)
+	@strip	$(EXEC)
 	@./$(EXEC)
 test:		testsuiteprologue testsuite testsuiteepilogue
 testsuiteprologue:
-	@echo
-	@printf "OS:        %s\n" $(HOSTOS)
-	@printf "COMPILER:  %s\n" $(CC)
-	@printf "VERSION:   "
-	@$(CC) -v 2>&1 | head -n 1
 	@echo
 	@echo "RUNNING TEST SUITE"
 	@echo "------------------"
@@ -115,7 +132,7 @@ testsuiteepilogue:
 
 
 
-TESTCC		=	$(CC) $(RELEASE) $(STRICT3)
+TESTCC		=	$(CC) $(RELEASE) $(STRICT1)
 TESTSTART	=	@printf "%s %-17s%s" "Testing" $(subst test_,,$@...)
 TESTEND		=	printf $(SUCCESS) || printf $(FAILURE)
 TESTTGT		=	TEST/testexec
@@ -125,9 +142,9 @@ TESTTGT		=	TEST/testexec
 test_rtfprocess: $(ALLSRC)
 	$(TESTSTART)
 	@$(TESTCC) $(SOURCE) -o $(TESTTGT)
-	@$(TESTTGT) < TEST/rtfprocess-input.rtf > TEST/rtfprocess-output.rtf
-	@diff TEST/rtfprocess-output.rtf TEST/rtfprocess-correct.rtf > /dev/null && $(TESTEND)
-	@rm $(TESTTGT) TEST/rtfprocess-output.rtf
+	@$(TESTTGT) < TEST/rtfprocess-input.rtf > test_result.tmp
+	@diff test_result.tmp TEST/rtfprocess-correct.rtf > /dev/null && $(TESTEND)
+	@rm $(TESTTGT) test_result.tmp
 
 test_utf8test: STATIC/regex/*.c TEST/utf8test.c
 	$(TESTSTART)
@@ -146,17 +163,17 @@ test_speedtest:
 	@$(TESTCC) $(SOURCE) -o $(TESTTGT)
 	@strip $(TESTTGT)
 	@echo
-	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf TEST/bigfile-output.rtf
-	@rm $(TESTTGT) TEST/bigfile-output.rtf
+	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
+	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
+	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
+	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
+	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
+	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
+	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
+	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
+	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
+	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
+	@rm $(TESTTGT) test_result.tmp
 
 
 clean:

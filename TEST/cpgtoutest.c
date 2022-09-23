@@ -17,7 +17,7 @@ static unsigned char output[256] = { 0 };
 
 int main(void) {
     int32_t uccp;
-    const int32_t *mult;
+    const int32_t *mult = 0;
     uint8_t xtra = 0U;
 
     size_t i;

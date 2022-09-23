@@ -31,8 +31,9 @@ typedef struct rtfattr {
     bool            nocmd;       // Do not process commands in this block
     bool            notxt;       // Do not process data as text in this block
          
-    cpg_t           charset;     // Principally for Word
+    cpg_t           ansicodepage;// Principally for WordPad, Pages, TextEdit
     cpg_t           codepage;    // Principally for WordPad, Pages, TextEdit
+    cpg_t           charset;     // Principally for Word
          
     struct          rtfattr *outer;
 } rtfattr;
@@ -42,8 +43,6 @@ typedef struct rtfattr {
 typedef struct rtfobj {
     FILE         *  fin;          // RTF file-in
     FILE         *  fout;         // RTF file-out
-
-    int             fatalerr;     // Cf. ERRNO. E.g., EIO, ENOMEM, etc.
 
     size_t          ri;           // raw/txt/cmd iterators, buffer
     size_t          ti;           // sizes, and buffers
@@ -55,6 +54,8 @@ typedef struct rtfobj {
     char            txt[TXT_BUFFER_SIZE];
     char            cmd[CMD_BUFFER_SIZE];
     size_t          txtrawmap[TXT_BUFFER_SIZE];
+
+    int             fatalerr;     // Cf. ERRNO. E.g., EIO, ENOMEM, etc.
 
     int32_t         highsurrogate;
 
