@@ -52,8 +52,9 @@
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
+#include <assert.h>
 #include "rtfsed.h"
-#include "STATIC/regex/re.h"
+#include "STATIC/crex/crex.h"
 #include "STATIC/cpgtou/cpgtou.h"
 #include "STATIC/utillib/utillib.h"
 
@@ -64,12 +65,13 @@ static void dispatch_command(rtfobj *R);
 static void read_command(rtfobj *R);
 static void proc_command(rtfobj *R);
 static void proc_cmd_escapedliteral(rtfobj *R);
-// static void proc_cmd_asterisk(rtfobj *R);
 static void proc_cmd_uc(rtfobj *R);
 static void proc_cmd_u(rtfobj *R);
 static void proc_cmd_apostrophe(rtfobj *R);
 static void proc_cmd_fonttbl(rtfobj *R);
 static void proc_cmd_f(rtfobj *R);
+static void proc_cmd_fcharset(rtfobj *R);
+static void proc_cmd_cchs(rtfobj *R);
 static void proc_cmd_shuntblock(rtfobj *R);
 static void proc_cmd_newpar(rtfobj *R);
 static void proc_cmd_newline(rtfobj *R);
@@ -88,12 +90,21 @@ static void reset_raw_buffer(rtfobj *R);
 static void reset_txt_buffer(rtfobj *R);
 static void reset_cmd_buffer(rtfobj *R);
 
-static void encode_utf8(int32_t c, char utf8[5]);
+static void utf8_from_cdpt(int32_t c, char utf8[5]);
 static int32_t cdpt_from_utf16(uint16_t hi, uint16_t lo);
 static int32_t get_num_arg(const char *s);
 static int32_t get_hex_arg(const char *s);
 
-#define REGEX_MATCH(x, y)    (re_match(y, x, NULL) > -1)
+#define RGX_MATCH(x, y)    (regex_match(y, x, NULL)>-1)
+#define CHR_MATCH(x, y)    (x[0] == y && x[1] == 0)
+
+// static inline bool CMD_MATCH(const char *x, const char *y) {
+//     int i;
+//     for (i=0; x[i] == y[i] && x[i] > 0; i++);
+//     if (y[i]=='\0'  &&  ( x[i]=='\0' || (x[i]==' '&&x[i+1]=='\0' ))) return true;
+//     else return false;
+// }
+// #define REMATCH(x, y)        (re_matchp(y, x, NULL) > -1)
 
 
 
@@ -126,6 +137,8 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **srch) {
     R->txtz = TXT_BUFFER_SIZE;
     R->cmdz = CMD_BUFFER_SIZE;
 
+    R->fonttbl_z = FONTTBL_SIZE;
+
     // Set up replacement dictionary
     for (i=0; srch[i] != NULL; i++); 
     R->srchz = i/2;
@@ -142,7 +155,7 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **srch) {
         R->srch_val[i] = srch[2*i+1];
     }
 
-    R->attr = NULL;
+    R->attr = &R->topattr;
 
     FUNC_RETURN(R);
 }
@@ -164,7 +177,7 @@ void delete_rtfobj(rtfobj *R) {
         // a NULL pointer during processing if there's text past the closing
         // brace of the RTF file (even spaces). ONLY the delete_rtfobj() 
         // function should remove the last attribute set. 
-        free(R->attr);
+        // free(R->attr);
     }
     free(R);
     FUNC_VOID_RETURN;
@@ -196,7 +209,7 @@ void rtfreplace(rtfobj *R) {
             default:            dispatch_text(c, R);       break;
         }
 
-        if (R->ti>0 && R->attr && (R->attr->notxt == false)) {
+        if (R->ti>0 && !R->attr->notxt) {
             switch (pattern_match(R)) {
                 case PARTIAL:        /* Keep reading */        break;
                 case MATCH:          output_match(R);
@@ -241,7 +254,7 @@ static void dispatch_scope(int c, rtfobj *R) {
 static void dispatch_command(rtfobj *R) {
     FUNC_ENTER;
     read_command(R);
-    proc_command(R);
+    if (!R->attr->nocmd) proc_command(R);
     // RAW/TXT BUFFER COORDINATION
     //
     // Add the command to the raw buffer, but only AFTER proc_command()
@@ -267,12 +280,20 @@ static void dispatch_text(int c, rtfobj *R) {
     // Ignore newlines and carriage returns in RTF code. Consider tabs and
     // vertical tabs to be interchangeable with spaces. Treat everything else
     // literally. 
-    if (R->attr && R->attr->notxt) {                  add_to_raw(c, R);     }
-    else if (c == '\n') {                             add_to_raw(c, R);     }
-    else if (c == '\r') {                             add_to_raw(c, R);     } 
-    else if (c == '\t') {     add_to_txt(' ', R);     add_to_raw(c, R);     }
-    else if (c == '\v') {     add_to_txt(' ', R);     add_to_raw(c, R);     }
-    else {                    add_to_txt(c, R);       add_to_raw(c, R);     }
+    if (R->attr->notxt) { add_to_raw(c, R); FUNC_VOID_RETURN; }
+
+    switch(c) {
+        case '\r':
+        case '\n':
+            break;
+        case '\t':
+        case '\v':
+            add_to_txt(' ', R);
+            break;
+        default:
+            add_to_txt(c, R);
+    }
+    add_to_raw(c, R);
     FUNC_VOID_RETURN;
 }
 
@@ -390,39 +411,41 @@ static void proc_command(rtfobj *R) {
     FUNC_ENTER;
     // Set pointer for internal use so that we don't have to deal with 
     // backslashes at the beginning of our regular expression matching
-    char *cmd = &R->cmd[1];
+    char *c = &R->cmd[1];
 
     if (0); 
-    else if (REGEX_MATCH(cmd, "^\\$"))            proc_cmd_escapedliteral(R);
-    else if (REGEX_MATCH(cmd, "^{$"))             proc_cmd_escapedliteral(R);
-    else if (REGEX_MATCH(cmd, "^}$"))             proc_cmd_escapedliteral(R);
-    else if (REGEX_MATCH(cmd, "^uc[0-9]+ ?$"))    proc_cmd_uc(R);
-    else if (REGEX_MATCH(cmd, "^u-?[0-9]+ ?$"))   proc_cmd_u(R);
-    else if (REGEX_MATCH(cmd, 
-             "^\'[0-9A-Fa-f][0-9A-Fa-f] ?$"))     proc_cmd_apostrophe(R);
-    else if (REGEX_MATCH(cmd, "^fonttbl ?$"))     proc_cmd_fonttbl(R);
-    else if (REGEX_MATCH(cmd, "^f[0-9]+ ?$"))     proc_cmd_f(R);
-    else if (REGEX_MATCH(cmd, "^pict ?$"))        proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(cmd, "^colortbl ?$"))    proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(cmd, "^stylesheet ?$"))  proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(cmd, "^operator ?$"))    proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(cmd, "^bin ?$"))         proc_cmd_shuntblock(R);
-    else if (REGEX_MATCH(cmd, "^par ?$"))         proc_cmd_newpar(R);
-    else if (REGEX_MATCH(cmd, "^line ?$"))        proc_cmd_newline(R);
-    else if (REGEX_MATCH(cmd, 
-             "^[\r\n][\r\n]? ?$"))                proc_cmd_newline(R);
-    else if (1)                                   proc_cmd_unknown(R);
+    else if (CHR_MATCH(c,'{'))                 proc_cmd_escapedliteral(R);
+    else if (CHR_MATCH(c,'}'))                 proc_cmd_escapedliteral(R);
+    else if (CHR_MATCH(c,'\\'))                proc_cmd_escapedliteral(R);
+    else if (CHR_MATCH(c,'\r'))                proc_cmd_newline(R);
+    else if (CHR_MATCH(c,'\n'))                proc_cmd_newline(R);
+    else if (RGX_MATCH(c,"^\'\\x\\x"))         proc_cmd_apostrophe(R);
+    else if (RGX_MATCH(c,"^u-?\\d+ ?$"))       proc_cmd_u(R);
+    else if (RGX_MATCH(c,"^uc\\d+ ?$"))        proc_cmd_uc(R);
+    else if (RGX_MATCH(c,"^f\\d+ ?$"))         proc_cmd_f(R);
+    else if (RGX_MATCH(c,"^fcharset\\d+ ?$"))  proc_cmd_fcharset(R);
+    else if (RGX_MATCH(c,"^cchs\\d+ ?$"))      proc_cmd_cchs(R);
+    else if (RGX_MATCH(c,"^fonttbl ?$"))       proc_cmd_fonttbl(R);
+    else if (RGX_MATCH(c,"^par ?$"))           proc_cmd_newpar(R);
+    else if (RGX_MATCH(c,"^line ?$"))          proc_cmd_newline(R);
+    else if (RGX_MATCH(c,"^pict ?$"))          proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^colortbl ?$"))      proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^stylesheet ?$"))    proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^operator ?$"))      proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^bin ?$"))           proc_cmd_shuntblock(R);
+    else                                       proc_cmd_unknown(R);
     
-    // If the command is \* then the entire block is optional, but... if we 
-    // then recognize the command, revoke that 'optional' status.
-    if (REGEX_MATCH(R->cmd, "^*$")) R->attr->blkoptional = true;
-    else                            R->attr->blkoptional = false;
+    // If the command is \* then the entire block is optional, but...
+    // if we then recognize the command, revoke any 'optional' status.
+    if (RGX_MATCH(c, "^*$"))             R->attr->blkoptional = true;
+    else                                 R->attr->blkoptional = false;
+
     FUNC_VOID_RETURN;
 }
 
 
 
-static void proc_cmd_escapedliteral(rtfobj *R) {
+static inline void proc_cmd_escapedliteral(rtfobj *R) {
     FUNC_ENTER;
     add_to_txt(R->cmd[1], R);
     FUNC_VOID_RETURN;
@@ -430,7 +453,7 @@ static void proc_cmd_escapedliteral(rtfobj *R) {
 
 
 
-static void proc_cmd_uc(rtfobj *R) {
+static inline void proc_cmd_uc(rtfobj *R) {
     FUNC_ENTER;
     R->attr->uc = (size_t)get_num_arg(&R->cmd[1]);
     FUNC_VOID_RETURN;
@@ -463,11 +486,11 @@ static void proc_cmd_u(rtfobj *R) {
     } else if (0xDC00 <= arg && arg <= 0xDFFF) {
         // Argument is in the low surrogate range
         int32_t cdpt = cdpt_from_utf16((uint16_t)R->highsurrogate, (uint16_t)arg);
-        encode_utf8(cdpt, utf8);
+        utf8_from_cdpt(cdpt, utf8);
         add_string_to_txt(utf8, R);
     } else {
         // Argument is likely in the Basic Multilingual Plane
-        encode_utf8(arg, utf8);
+        utf8_from_cdpt(arg, utf8);
         add_string_to_txt(utf8, R);
     }
     
@@ -479,23 +502,53 @@ static void proc_cmd_u(rtfobj *R) {
 
 static void proc_cmd_apostrophe(rtfobj *R) {
     FUNC_ENTER;
+    int32_t cdpt;
+    uint8_t arg;
+    const int32_t *mult;
     char utf8[5];
+
     if (R->attr->uc0i) {
         R->attr->uc0i--;
-    } else {
+    } 
+    
+    else {
         // TODO: CONVERT FROM CODE PAGE TO UNICODE (SEE HEADER TODO)
-        encode_utf8(get_hex_arg(&R->cmd[1]), utf8);
-        add_string_to_txt(utf8, R);
+        arg = (uint8_t)get_hex_arg(&R->cmd[1]);
+        cdpt = cpgtou(R->attr->codepage, arg, &R->attr->xtra, &mult);
+
+        if (cdpt == cpMULT) {
+            for ( ; *mult != 0; mult++) {
+                utf8_from_cdpt(*mult, utf8);
+                add_string_to_txt(utf8, R);
+            }
+        } 
+        else if (cdpt < 0) {
+            // Unsupported, none, or need another byte to add to xtra
+            // if (cdpt == cpDBSQ) {
+            if (R->attr->xtra != 0) {
+                DBUG("CPG: %d\tARG: \'%x", R->attr->codepage, arg);
+                DBUG("Double byte sequence resulted in xtra containing 0x%X",
+                     R->attr->xtra);
+                DBUG("Raw buffer is |%s|", R->raw);
+                DBUG("Cmd buffer is |%s|", R->cmd);
+            }
+        }
+        else {
+            utf8_from_cdpt(cdpt, utf8);
+            add_string_to_txt(utf8, R);
+        }
     }
+
     FUNC_VOID_RETURN;
 }
 
 
 
-static void proc_cmd_fonttbl(rtfobj *R) {
+static inline void proc_cmd_fonttbl(rtfobj *R) {
     FUNC_ENTER;
-    R->attr->fonttbl = true;
     R->attr->notxt = true;
+    R->attr->fonttbl = true;
+    R->attr->fonttbl_defn_idx = -1;
     FUNC_VOID_RETURN;
 }
 
@@ -503,11 +556,57 @@ static void proc_cmd_fonttbl(rtfobj *R) {
 
 static void proc_cmd_f(rtfobj *R) {
     FUNC_ENTER;
+    size_t i;
+    int32_t arg = get_num_arg(&R->cmd[2]);
+
+    // If defining a fonttbl, look for an existing font entry for f
+    // If it can't be found, create it (assuming there's space)
+    // TODO: Keep these sorted and do a binary search. 
     if (R->attr->fonttbl) {
-        // Define a new font (with default fcharset)
-    } else {
-        // Set charset to the corresponding fcharset of the font
+        for (i = 0; i < R->fonttbl_n; i++)  if (R->fonttbl_f[i] == arg) break;
+
+        if (i == R->fonttbl_n) {
+            if (R->fonttbl_n + 1 < R->fonttbl_z) {
+                R->fonttbl_n++;
+                R->fonttbl_f[i]            = arg;
+                R->fonttbl_charset[i]      = cpNONE;
+                R->attr->fonttbl_defn_idx  = (int32_t)i;
+            } else {
+                FUNC_VOID_DIE("Out of fonttbl space, not defining f%d\n", arg);
+            }
+        }
+    } 
+    
+    else {
+        for (i=0; i<R->fonttbl_n; i++) { if (R->fonttbl_f[i] == arg) break; }
+
+        if (i < R->fonttbl_n) {
+             R->attr->codepage = cpgfromcharsetnum(R->fonttbl_charset[i]);
+        }
     }
+
+    FUNC_VOID_RETURN;
+}
+
+
+
+static void proc_cmd_fcharset(rtfobj *R) {
+    FUNC_ENTER;
+    int32_t arg = get_num_arg(&R->cmd[9]);
+
+    if (R->attr->fonttbl && R->attr->fonttbl_defn_idx >= 0) {
+        R->fonttbl_charset[R->attr->fonttbl_defn_idx] = arg;
+    }
+    FUNC_VOID_RETURN;
+}
+
+
+
+static void proc_cmd_cchs(rtfobj *R) {
+    FUNC_ENTER;
+    int32_t arg = get_num_arg(&R->cmd[5]);
+
+    R->attr->codepage = cpgfromcharsetnum(arg);
     FUNC_VOID_RETURN;
 }
 
@@ -562,18 +661,27 @@ static void proc_cmd_unknown(rtfobj *R) {
 /////////////////////////////////////////////////////////////////////////////
 
 static void add_to_raw(int c, rtfobj *R) {
-    FUNC_ENTER;
-    if (R->ri+1 >= R->rawz) {
-        DBUG("Exhausted raw buffer.");
-        DBUG("R->ri = %zu. Last raw data: \'%s\'", R->ri, &R->raw[R->ri-80]);
-        DBUG("No match within limits. Flushing buffers, attempting recovery");
-        output_raw(R);
-        reset_raw_buffer(R);
-        reset_txt_buffer(R);
-        reset_cmd_buffer(R);
+    // FUNC_ENTER;
+    if (R->ri+1 & RAW_BUFFER_SIZE) {
+        // if (R->ti > 0) {
+        //     DBUG("Exhausted raw buffer.");
+        //     DBUG("R->ri = %zu. Last raw data: \'%s\'", R->ri, &R->raw[R->ri-80]);
+        //     DBUG("No match within limits. Flushing buffers, attempting recovery");
+        // }
+        // output_raw(R);
+        // reset_raw_buffer(R);
+        // reset_txt_buffer(R);
+        // reset_cmd_buffer(R);
+        fwrite(R->raw, 1, R->ri, R->fout);
+        R->ri = 0UL;
+        R->ti = 0UL;
+        R->ci = 0UL;
+        memzero(R->raw, R->ri);
+        memzero(R->txt, R->ti);
+        memzero(R->cmd, R->ci);
     }
     R->raw[R->ri++] = (char)c;
-    FUNC_VOID_RETURN;
+    // FUNC_VOID_RETURN;
 }
 
 
@@ -633,8 +741,8 @@ static void add_to_cmd(int c, rtfobj *R) {
 static void add_string_to_txt(const char *s, rtfobj *R) {
     FUNC_ENTER;
     if (R->ti+strlen(s) >= R->txtz) {
-        LOG("Exhausted txt buffer.");
-        LOG("R->ti = %zu. Last txt data: \'%s\'", R->ti, &R->txt[R->ti-80]);
+        DBUG("Exhausted txt buffer.");
+        DBUG("R->ti = %zu. Last txt data: \'%s\'", R->ti, &R->txt[R->ti-80]);
         LOG("No match within limits. Flushing buffers, trying to recover.");
         output_raw(R);
         reset_raw_buffer(R);
@@ -650,8 +758,8 @@ static void add_string_to_txt(const char *s, rtfobj *R) {
 static void add_string_to_raw(const char *s, rtfobj *R) {
     FUNC_ENTER;
     if (R->ri+strlen(s) >= R->rawz) {
-        LOG("Exhausted raw buffer.");
-        LOG("R->ri = %zu. Last raw data: \'%s\'", R->ri, &R->raw[R->ri-80]);
+        DBUG("Exhausted raw buffer.");
+        DBUG("R->ri = %zu. Last raw data: \'%s\'", R->ri, &R->raw[R->ri-80]);
         LOG("No match within limits. Flushing buffers, trying to recover.");
         output_raw(R);
         reset_raw_buffer(R);
@@ -761,24 +869,17 @@ static void push_attr(rtfobj *R) {
         FUNC_VOID_DIE("Out-of-memory allocating new attribute scope.");
     }
 
-    if (R->attr == NULL) {
-        newattr->uc = 0;
-        newattr->uc0i = 0;
-        newattr->blkoptional = false;
-        newattr->nocmd = false;
-        newattr->notxt = false;
-        newattr->fonttbl = false;
-        newattr->outer = NULL;
-        R->attr = newattr;
-    } else {
-        // "If an RTF scope delimiter character (that is, an opening or
-        // closing brace) is encountered while scanning skippable data,
-        // the skippable data is considered to end before the delimiter."
-        R->attr->uc0i = 0; 
-        memmove(newattr, R->attr, sizeof *newattr);
-        newattr->outer = R->attr;
-        R->attr = newattr;
-    }
+    assert(R->attr != NULL);
+
+    // "If an RTF scope delimiter character (that is, an opening or
+    // closing brace) is encountered while scanning skippable data,
+    // the skippable data is considered to end before the delimiter."
+    R->attr->uc0i = 0; 
+
+    memmove(newattr, R->attr, sizeof *newattr);
+    newattr->outer = R->attr;
+    R->attr = newattr;
+    
     FUNC_VOID_RETURN;
 }
 
@@ -788,13 +889,12 @@ static void pop_attr(rtfobj *R) {
     FUNC_ENTER;
     rtfattr *oldattr = NULL;
 
-    if (R->attr && R->attr->outer) {
+    assert(R->attr != NULL);
+
+    if (R->attr != &R->topattr) {
         oldattr = R->attr;        // Point it at the current attribute set
         R->attr = oldattr->outer; // Modify structure to point to outer scope
         free(oldattr);            // Delete the old attribute set
-    } else {
-        // DBUG("Attempt to pop non-existent attribute set off stack!");
-        // DBUG("Ignoring likely off-by-one error.");
     }
     FUNC_VOID_RETURN;
 }
@@ -812,32 +912,46 @@ static void pop_attr(rtfobj *R) {
 ////                                                                     ////
 /////////////////////////////////////////////////////////////////////////////
 
-static void encode_utf8(int32_t c, char utf8[5]) {
+static void utf8_from_cdpt(int32_t c, char utf8[5]) {
     FUNC_ENTER;
     char *u = utf8;
-    if (c < 0) {
+    const int32_t Ob000000000000010000000 =     0x80;
+    const int32_t Ob000000000100000000000 =    0x800;
+    const int32_t Ob000010000000000000000 =  0x10000;
+    const int32_t Ob100010000000000000000 = 0x110000;
+    const int8_t  Ob00000000 = (int8_t)0x00;
+    const int8_t  Ob00000111 = (int8_t)0x07;
+    const int8_t  Ob00001111 = (int8_t)0x0F;
+    const int8_t  Ob00011111 = (int8_t)0x1F;
+    const int8_t  Ob00111111 = (int8_t)0x3F;
+    const int8_t  Ob01111111 = (int8_t)0x7F;
+    const int8_t  Ob10000000 = (int8_t)0x80;
+    const int8_t  Ob11000000 = (int8_t)0xC0;
+    const int8_t  Ob11100000 = (int8_t)0xE0;
+    const int8_t  Ob11110000 = (int8_t)0xF0;
+    if ( (c < 0) || (0xD800 <= c&&c <= 0xDBFF) ) {
         u[0]= '\0';
     } else 
-    if (c < 0b000000000000010000000) {            // Up to 7 bits
-        u[0]= (char)((c>>0  & 0b01111111) | 0b00000000);  // 7 bits –> 0xxxxxxx
+    if (c < Ob000000000000010000000) {            // Up to 7 bits
+        u[0]= (char)((c>>0  & Ob01111111) | Ob00000000);  // 7 bits –> 0xxxxxxx
         u[1]= '\0';
     } 
-    else if (c < 0b000000000100000000000) {      // Up to 11 bits
-        u[0]= (char)((c>>6  & 0b00011111) | 0b11000000);  // 5 bits –> 110xxxxx
-        u[1]= (char)((c>>0  & 0b00111111) | 0b10000000);  // 6 bits –> 10xxxxxx
+    else if (c < Ob000000000100000000000) {      // Up to 11 bits
+        u[0]= (char)((c>>6  & Ob00011111) | Ob11000000);  // 5 bits –> 110xxxxx
+        u[1]= (char)((c>>0  & Ob00111111) | Ob10000000);  // 6 bits –> 10xxxxxx
         u[2]= '\0';
     } 
-    else if (c < 0b000010000000000000000) {      // Up to 16 bits
-        u[0]= (char)((c>>12 & 0b00001111) | 0b11100000);  // 4 bits –> 1110xxxx
-        u[1]= (char)((c>>6  & 0b00111111) | 0b10000000);  // 6 bits –> 10xxxxxx
-        u[2]= (char)((c>>0  & 0b00111111) | 0b10000000);  // 6 bits –> 10xxxxxx
+    else if (c < Ob000010000000000000000) {      // Up to 16 bits
+        u[0]= (char)((c>>12 & Ob00001111) | Ob11100000);  // 4 bits –> 1110xxxx
+        u[1]= (char)((c>>6  & Ob00111111) | Ob10000000);  // 6 bits –> 10xxxxxx
+        u[2]= (char)((c>>0  & Ob00111111) | Ob10000000);  // 6 bits –> 10xxxxxx
         u[3]= '\0';
     } 
-    else if (c < 0b100010000000000000000) {      // Up to 21 bits
-        u[0]= (char)((c>>18 & 0b00000111) | 0b11110000);  // 3 bits –> 11110xxx
-        u[1]= (char)((c>>12 & 0b00111111) | 0b10000000);  // 6 bits –> 10xxxxxx
-        u[2]= (char)((c>>6  & 0b00111111) | 0b10000000);  // 6 bits –> 10xxxxxx
-        u[3]= (char)((c>>0  & 0b00111111) | 0b10000000);  // 6 bits –> 10xxxxxx
+    else if (c < Ob100010000000000000000) {      // Up to 21 bits
+        u[0]= (char)((c>>18 & Ob00000111) | Ob11110000);  // 3 bits –> 11110xxx
+        u[1]= (char)((c>>12 & Ob00111111) | Ob10000000);  // 6 bits –> 10xxxxxx
+        u[2]= (char)((c>>6  & Ob00111111) | Ob10000000);  // 6 bits –> 10xxxxxx
+        u[3]= (char)((c>>0  & Ob00111111) | Ob10000000);  // 6 bits –> 10xxxxxx
         u[4]= '\0';
     } 
     else {
@@ -853,6 +967,10 @@ static int32_t cdpt_from_utf16(uint16_t hi, uint16_t lo) {
     int32_t cdpt;
     bool hisurrogate = (0xD800 <= hi && hi <= 0xDBFF);
     bool losurrogate = (0xDC00 <= lo && lo <= 0xDFFF);
+    const uint16_t Ob000000000001111111111 = 0x003F;
+    const uint16_t Ob00000111111           = 0x003F;
+    const uint16_t Ob01111000000           = 0x03C0;
+    const uint16_t Ob00001000000           = 0x0040;
 
     if (hisurrogate && losurrogate) {
         // We have a valid surrogate pair, so convert it.
@@ -861,10 +979,10 @@ static int32_t cdpt_from_utf16(uint16_t hi, uint16_t lo) {
         //                   110111xxxxxxxxxx
         // map to scalar code points of value:
         //              uuuuuyyyyyyxxxxxxxxxx     (uuuuu=wwww+1)
-        cdpt = ((lo & 0b000000000001111111111)) |
-               ((hi & 0b00000111111)    << 10 ) |
-               ((hi & 0b01111000000)    << 10 ) +
-               ((     0b00001000000)    << 10 ) ;
+        cdpt = ((lo & Ob000000000001111111111)) |
+               ((hi & Ob00000111111)    << 10 ) |
+               ((hi & Ob01111000000)    << 10 ) +
+               ((     Ob00001000000)    << 10 ) ;
     } else if (!hisurrogate && !losurrogate) {
         // Neither of this pair is a surrogate; lo should be a valid code
         // point in the Basic Multilingual Plane, so return that. 
@@ -908,14 +1026,14 @@ static int32_t get_num_arg(const char *s) {
 
 static int32_t get_hex_arg(const char *s) {
     FUNC_ENTER;
-    const char *validchars="0123456789ABCDEFabcdef-";
+    const char *validchars="0123456789ABCDEFabcdef";
     const char *p;
-    int32_t retval;
+    uint32_t retval;
 
     p = s;
     while (!strchr(validchars, *p)) p++;
 
     sscanf(p, "%"SCNx32, &retval);
 
-    FUNC_RETURN(retval);
+    FUNC_RETURN((int32_t)retval);
 }

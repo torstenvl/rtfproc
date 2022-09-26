@@ -10,17 +10,15 @@
 #define VALIDSTRING(x) (strlen(x) > 0)
 
 #if defined( RTFAUTOOPEN )
-#define RTFINFILE   "TEST/rtfprocess-input.rtf"
-#define RTFOUTFILE  "TEST/rtfprocess-output.rtf"
-#if defined ( OS_MAC )
-#define OPENCMD     "open TEST/rtfprocess-output.rtf"
-#elif defined ( OS_LINUX )
-#define OPENCMD     "xdg-open TEST/rtfprocess-output.rtf"
-#elif defined ( OS_BSD )
-#define OPENCMD     "xdg-open TEST/rtfprocess-output.rtf"
-#elif defined( OS_WIN )
-#define OPENCMD     "start TEST/rtfprocess-output.rtf"
-#endif
+  #define RTFINFILE   "TEST/rtfprocess-input.rtf"
+  #define RTFOUTFILE  "TEST/rtfprocess-output.rtf"
+  #if defined( OS_MAC )
+    #define OPENCMD     "open TEST/rtfprocess-output.rtf"
+  #elif defined( OS_LINUX ) ||  defined( OS_BSD )
+    #define OPENCMD     "xdg-open TEST/rtfprocess-output.rtf"
+  #elif defined( OS_WIN )
+    #define OPENCMD     "start TEST/rtfprocess-output.rtf"
+  #endif
 #else
 #define RTFINFILE   ""
 #define RTFOUTFILE  ""
@@ -38,11 +36,14 @@ int main(int argc, char **argv) {
 
     if (VALIDSTRING(finname)) {
         (fin = fopen(finname, "rb")) || DIE("Could not read file \'%s\'\n", finname);
-    }
+    } 
 
     if (VALIDSTRING(foutname)) {
         (fout = fopen(foutname, "wb")) || DIE("Could not write to file \'%s\'\n", foutname);
     } 
+
+    setvbuf(fin, NULL, _IOFBF,  (1<<21));
+    setvbuf(fout, NULL, _IOFBF, (1<<21));
 
     const char *replacements[] = {
         "«SSIC»",                    "1000",
@@ -62,6 +63,9 @@ int main(int argc, char **argv) {
     R = new_rtfobj(fin, fout, replacements);
     rtfreplace(R);
     delete_rtfobj(R);
+
+    if (fin != stdin) fclose(fin);
+    if (fout != stdout) fclose(fout);
 
     if (VALIDSTRING(OPENCMD)) {
         system(OPENCMD);

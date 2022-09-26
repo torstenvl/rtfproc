@@ -5,33 +5,37 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
 	HOSTOS		=	linux
 	CC			=	gcc
+	TIMECMD		=	/usr/bin/time --format "\t%e real\t%U user\t%S sys"
 	SUCCESS		=	"\342\234\205 OK\n"
 	FAILURE		=	"\342\235\214\033[1;31m FAILED!!!\033[m\n"
 else ifeq ($(UNAME_S),NetBSD)
-	HOSTOS		=	 bsd
-	CC			=	 gcc
+	HOSTOS		=	bsd
+	CC			=	gcc
+	TIMECMD		=	/usr/bin/time --format "\t%e real\t%U user\t%S sys"
 	SUCCESS		=	"\342\234\205 OK\n"
-	FAILURE		=	 "\342\235\214\033[1;31m FAILED!!!\033[m\n"
+	FAILURE		=	"\342\235\214\033[1;31m FAILED!!!\033[m\n"
 else ifeq ($(UNAME_S),OpenBSD)
 	HOSTOS		=	bsd
 	CC			=	clang
+	TIMECMD		=	/usr/bin/time --format "\t%e real\t%U user\t%S sys"
 	SUCCESS		=	"\342\234\205 OK\n"
 	FAILURE		=	"\342\235\214\033[1;31m FAILED!!!\033[m\n"
 else ifeq ($(UNAME_S),FreeBSD)
 	HOSTOS		=	bsd
 	CC			=	clang
+	TIMECMD		=	/usr/bin/time --format "\t%e real\t%U user\t%S sys"
 	SUCCESS		=	"\342\234\205 OK\n"
 	FAILURE		=	"\342\235\214\033[1;31m FAILED!!!\033[m\n"
 else ifeq ($(UNAME_S),Darwin)
 	HOSTOS 		=	macos
 	CC			=	clang
-	SYSROOT		=	-isysroot \
-	                /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+	TIMECMD		=	time
 	SUCCESS		=	"\342\234\205 OK\n"
 	FAILURE		=	"\342\235\214\033[1;31m FAILED!!!\033[m\n"
 else 
 	HOSTOS 		=	unknown
 	CC			=	cc
+	TIMECMD		=	
 	SUCCESS		=	"\. OK\n"
 	FAILURE		=	"X FAILED!!!\n"
 endif
@@ -40,28 +44,23 @@ endif
 ##                          Compiler-specific flags
 #############################################################################
 ifeq ($(CC),clang)
-	O_SZ_FLAG	=	-Ofast
+	OPT_FLAG	=	-Ofast
 	DBUG_FLAG	=	-gfull -O0
 	WEVERYTHING	=	-Weverything 
-	
-#	WEXCLUDEOLD	=	-Wno-parentheses
-
 	WEXCLUDE	=	-Wno-gnu-binary-literal                    \
 					-Wno-c++98-compat                          \
 					-Wno-c99-compat                            \
 					-Wno-padded                                \
 	                -Wno-poison-system-directories
 else ifeq ($(CC),gcc)
-	O_SZ_FLAG	=	-Os
+	OPT_FLAG	=	-Os
 	DBUG_FLAG	=	-pg -O0
 	WEVERYTHING	=	
-	WEXCLUDE	=	-Wno-gnu-binary-literal                    \
-					-Wno-c++98-compat                          \
-					-Wno-c99-compat                            \
-					-Wno-padded                                \
-	                -Wno-poison-system-directories
+	WEXCLUDE	=	-Wno-parentheses                           \
+				  	-Wno-padded                                \
+	            	-Wno-unused-value
 else ifeq ($(CC),msvcpp)
-	O_SZ_FLAG	=	/Os
+	OPT_FLAG	=	/Os
 	DBUG_FLAG	=	/Zi /O0
 	WEVERYTHING	=	
 endif
@@ -70,8 +69,8 @@ endif
 #############################################################################
 ##      Basic build flags for different levels of strictness/debugging
 #############################################################################
-CFLAGS    = $(SYSROOT) -std=c2x -funsigned-char 
-RELEASE   = $(CFLAGS) $(O_SZ_FLAG) -DNDEBUG
+CFLAGS    = -std=c2x -funsigned-char 
+RELEASE   = $(CFLAGS) $(OPT_FLAG) -DNDEBUG
 DEBUG     = $(CFLAGS) $(DBUG_FLAG)
 STRICT1   = -W -Wall -Werror 
 STRICT2   = $(STRICT1) -pedantic                                        \
@@ -107,6 +106,8 @@ debug:	$(ALLSRC)
 	@$(CC)	$(SOURCE) $(DEBUG) 							-o $(EXEC)
 stackdebug:	$(ALLSRC)
 	@$(CC)	$(SOURCE) $(DEBUG) -DUL__NEED_STACKTRACE	-o $(EXEC)
+fortify:	$(ALLSRC)
+	@$(CC)	$(SOURCE) $(DEBUG) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=4 -fsanitize=address -o $(EXEC)
 strict:		$(ALLSRC)
 	@$(CC)	$(SOURCE) $(RELEASE) $(STRICT1)	$(WEXCLUDE)	-o $(EXEC)
 stricter:	$(ALLSRC)
@@ -132,8 +133,8 @@ testsuiteepilogue:
 
 
 
-TESTCC		=	$(CC) $(RELEASE) $(STRICT1)
-TESTSTART	=	@printf "%s %-17s%s" "Testing" $(subst test_,,$@...)
+TESTCC		=	$(CC) $(RELEASE) $(WEXCLUDE)
+TESTSTART	=	@printf "%s %-36s" "Testing" $(subst test_,,$@)
 TESTEND		=	printf $(SUCCESS) || printf $(FAILURE)
 TESTTGT		=	TEST/testexec
 
@@ -144,17 +145,17 @@ test_rtfprocess: $(ALLSRC)
 	@$(TESTCC) $(SOURCE) -o $(TESTTGT)
 	@$(TESTTGT) < TEST/rtfprocess-input.rtf > test_result.tmp
 	@diff test_result.tmp TEST/rtfprocess-correct.rtf > /dev/null && $(TESTEND)
-	@rm $(TESTTGT) test_result.tmp
+#	@rm $(TESTTGT) test_result.tmp
 
-test_utf8test: STATIC/regex/*.c TEST/utf8test.c
+test_utf8test: STATIC/crex/*.c TEST/utf8test.c STATIC/cpgtou/cpgtou.c
 	$(TESTSTART)
-	@$(TESTCC) STATIC/regex/*.c TEST/utf8test.c -o $(TESTTGT)
+	@$(TESTCC) STATIC/crex/*.c TEST/utf8test.c STATIC/cpgtou/cpgtou.c -o $(TESTTGT)
 	@$(TESTTGT) && $(TESTEND)
 	@rm $(TESTTGT) 
 
-test_cpgtoutest: STATIC/regex/*.c TEST/cpgtoutest.c
+test_cpgtoutest: STATIC/crex/*.c TEST/cpgtoutest.c STATIC/cpgtou/*.c
 	$(TESTSTART)
-	@$(TESTCC) STATIC/regex/*.c TEST/cpgtoutest.c -o $(TESTTGT)
+	@$(TESTCC) STATIC/crex/*.c TEST/cpgtoutest.c STATIC/cpgtou/*.c -o $(TESTTGT)
 	@$(TESTTGT) && $(TESTEND)
 	@rm $(TESTTGT) 
 
@@ -163,24 +164,24 @@ test_speedtest:
 	@$(TESTCC) $(SOURCE) -o $(TESTTGT)
 	@strip $(TESTTGT)
 	@echo
-	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
-	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
-	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
-	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
-	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
-	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
-	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
-	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
-	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
-	@time $(TESTTGT) TEST/bigfile-input.rtf test_result.tmp
-	@rm $(TESTTGT) test_result.tmp
+	@$(TIMECMD) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIMECMD) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIMECMD) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIMECMD) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIMECMD) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIMECMD) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIMECMD) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIMECMD) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIMECMD) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIMECMD) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@rm $(TESTTGT) temp.rtf
 
 
 clean:
 	@rm -Rf .DS_Store core *.o *~
 	@rm -Rf *.dSYM/ */*.dSYM
 	@rm -Rf Info.plist */Info.plist
-	@rm -Rf *-output* */*-output*
+	@rm -Rf *-output* TEST/*-output*
 	@rm -Rf $(TESTTGT)
 	@rm -Rf $(EXEC)
 	@echo Repository cleaned

@@ -5,7 +5,7 @@
 // to conduct unit tests on static functions
 #include "../rtfsed.c"
 
-#define ENCOD(x,y) (encode_utf8(y,x))
+#define ENCOD(x,y) (utf8_from_cdpt(y,x))
 #define CHECK(x,y) (assert(STREQ(x,y)))
 #define STREQ(x,y) (!strcmp(x,y))
 

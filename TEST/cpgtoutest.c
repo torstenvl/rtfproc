@@ -11,7 +11,7 @@ static unsigned char input[] = { 0x94, 0x45, 0x8e, 0xd2, 0x90, 0xed, 0x8e,
                                  0x93, 0x7c, 0x82, 0xb7, 0x81, 0x42, 0x00 };
 static unsigned char output[256] = { 0 };
 
-#define ENCOD(x,y) (encode_utf8(y,x))
+#define ENCOD(x,y) (utf8_from_cdpt(y,x))
 #define CHECK(x,y) (assert(!strcmp(x,y)))
 #define STRINGADD(s1, s2, max) (strncat((char *)s1, (char *)s2, (max - strlen((char *)s1) - 1)))
 
