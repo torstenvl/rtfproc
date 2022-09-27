@@ -54,7 +54,7 @@
 #include <errno.h>
 #include <assert.h>
 #include "rtfsed.h"
-#include "STATIC/crex/crex.h"
+#include "STATIC/trex/trex.h"
 #include "STATIC/cpgtou/cpgtou.h"
 #include "STATIC/utillib/utillib.h"
 
@@ -89,26 +89,11 @@ static void add_string_to_raw(const char *s, rtfobj *R);
 static void reset_raw_buffer(rtfobj *R);
 static void reset_txt_buffer(rtfobj *R);
 static void reset_cmd_buffer(rtfobj *R);
-
-static void utf8_from_cdpt(int32_t c, char utf8[5]);
-static int32_t cdpt_from_utf16(uint16_t hi, uint16_t lo);
 static int32_t get_num_arg(const char *s);
 static int32_t get_hex_arg(const char *s);
 
-#define RGX_MATCH(x, y)    (regex_match(y, x, NULL)>-1)
+#define RGX_MATCH(x, y)    (regexmatch((const unsigned char *) y, (const unsigned char *) x))
 #define CHR_MATCH(x, y)    (x[0] == y && x[1] == 0)
-
-// static inline bool CMD_MATCH(const char *x, const char *y) {
-//     int i;
-//     for (i=0; x[i] == y[i] && x[i] > 0; i++);
-//     if (y[i]=='\0'  &&  ( x[i]=='\0' || (x[i]==' '&&x[i+1]=='\0' ))) return true;
-//     else return false;
-// }
-// #define REMATCH(x, y)        (re_matchp(y, x, NULL) > -1)
-
-
-
-
 
 
 
@@ -463,8 +448,6 @@ static inline void proc_cmd_uc(rtfobj *R) {
 
 static void proc_cmd_u(rtfobj *R) {
     FUNC_ENTER;
-    // This is going to be way way way more complicated...
-    char utf8[5];
     int32_t arg = get_num_arg(&R->cmd[1]);
     
     // RTF 1.9 Spec: "Most RTF control words accept signed 16-bit numbers as
@@ -486,12 +469,10 @@ static void proc_cmd_u(rtfobj *R) {
     } else if (0xDC00 <= arg && arg <= 0xDFFF) {
         // Argument is in the low surrogate range
         int32_t cdpt = cdpt_from_utf16((uint16_t)R->highsurrogate, (uint16_t)arg);
-        utf8_from_cdpt(cdpt, utf8);
-        add_string_to_txt(utf8, R);
+        add_string_to_txt((const char*)utf8_from_cdpt(cdpt), R);
     } else {
         // Argument is likely in the Basic Multilingual Plane
-        utf8_from_cdpt(arg, utf8);
-        add_string_to_txt(utf8, R);
+        add_string_to_txt((const char*)utf8_from_cdpt(arg), R);
     }
     
     R->attr->uc0i = R->attr->uc;
@@ -505,7 +486,6 @@ static void proc_cmd_apostrophe(rtfobj *R) {
     int32_t cdpt;
     uint8_t arg;
     const int32_t *mult;
-    char utf8[5];
 
     if (R->attr->uc0i) {
         R->attr->uc0i--;
@@ -518,8 +498,7 @@ static void proc_cmd_apostrophe(rtfobj *R) {
 
         if (cdpt == cpMULT) {
             for ( ; *mult != 0; mult++) {
-                utf8_from_cdpt(*mult, utf8);
-                add_string_to_txt(utf8, R);
+                add_string_to_txt((const char*)utf8_from_cdpt(*mult), R);
             }
         } 
         else if (cdpt < 0) {
@@ -534,8 +513,7 @@ static void proc_cmd_apostrophe(rtfobj *R) {
             }
         }
         else {
-            utf8_from_cdpt(cdpt, utf8);
-            add_string_to_txt(utf8, R);
+            add_string_to_txt((const char*)utf8_from_cdpt(cdpt), R);
         }
     }
 
@@ -898,104 +876,6 @@ static void pop_attr(rtfobj *R) {
     }
     FUNC_VOID_RETURN;
 }
-
-
-
-
-
-
-
-
-/////////////////////////////////////////////////////////////////////////////
-////                                                                     ////
-////                          UNICODE FUNCTIONS                          ////
-////                                                                     ////
-/////////////////////////////////////////////////////////////////////////////
-
-static void utf8_from_cdpt(int32_t c, char utf8[5]) {
-    FUNC_ENTER;
-    char *u = utf8;
-    const int32_t Ob000000000000010000000 =     0x80;
-    const int32_t Ob000000000100000000000 =    0x800;
-    const int32_t Ob000010000000000000000 =  0x10000;
-    const int32_t Ob100010000000000000000 = 0x110000;
-    const int8_t  Ob00000000 = (int8_t)0x00;
-    const int8_t  Ob00000111 = (int8_t)0x07;
-    const int8_t  Ob00001111 = (int8_t)0x0F;
-    const int8_t  Ob00011111 = (int8_t)0x1F;
-    const int8_t  Ob00111111 = (int8_t)0x3F;
-    const int8_t  Ob01111111 = (int8_t)0x7F;
-    const int8_t  Ob10000000 = (int8_t)0x80;
-    const int8_t  Ob11000000 = (int8_t)0xC0;
-    const int8_t  Ob11100000 = (int8_t)0xE0;
-    const int8_t  Ob11110000 = (int8_t)0xF0;
-    if ( (c < 0) || (0xD800 <= c&&c <= 0xDBFF) ) {
-        u[0]= '\0';
-    } else 
-    if (c < Ob000000000000010000000) {            // Up to 7 bits
-        u[0]= (char)((c>>0  & Ob01111111) | Ob00000000);  // 7 bits –> 0xxxxxxx
-        u[1]= '\0';
-    } 
-    else if (c < Ob000000000100000000000) {      // Up to 11 bits
-        u[0]= (char)((c>>6  & Ob00011111) | Ob11000000);  // 5 bits –> 110xxxxx
-        u[1]= (char)((c>>0  & Ob00111111) | Ob10000000);  // 6 bits –> 10xxxxxx
-        u[2]= '\0';
-    } 
-    else if (c < Ob000010000000000000000) {      // Up to 16 bits
-        u[0]= (char)((c>>12 & Ob00001111) | Ob11100000);  // 4 bits –> 1110xxxx
-        u[1]= (char)((c>>6  & Ob00111111) | Ob10000000);  // 6 bits –> 10xxxxxx
-        u[2]= (char)((c>>0  & Ob00111111) | Ob10000000);  // 6 bits –> 10xxxxxx
-        u[3]= '\0';
-    } 
-    else if (c < Ob100010000000000000000) {      // Up to 21 bits
-        u[0]= (char)((c>>18 & Ob00000111) | Ob11110000);  // 3 bits –> 11110xxx
-        u[1]= (char)((c>>12 & Ob00111111) | Ob10000000);  // 6 bits –> 10xxxxxx
-        u[2]= (char)((c>>6  & Ob00111111) | Ob10000000);  // 6 bits –> 10xxxxxx
-        u[3]= (char)((c>>0  & Ob00111111) | Ob10000000);  // 6 bits –> 10xxxxxx
-        u[4]= '\0';
-    } 
-    else {
-        u[0]= '\0';
-    }
-    FUNC_VOID_RETURN;
-}
-
-
-
-static int32_t cdpt_from_utf16(uint16_t hi, uint16_t lo) {
-    FUNC_ENTER;
-    int32_t cdpt;
-    bool hisurrogate = (0xD800 <= hi && hi <= 0xDBFF);
-    bool losurrogate = (0xDC00 <= lo && lo <= 0xDFFF);
-    const uint16_t Ob000000000001111111111 = 0x003F;
-    const uint16_t Ob00000111111           = 0x003F;
-    const uint16_t Ob01111000000           = 0x03C0;
-    const uint16_t Ob00001000000           = 0x0040;
-
-    if (hisurrogate && losurrogate) {
-        // We have a valid surrogate pair, so convert it.
-        // Unicode 15.0, Tbl 3-5 says UTF-16 surrogate pairs in form:
-        //         110110wwwwyyyyyy
-        //                   110111xxxxxxxxxx
-        // map to scalar code points of value:
-        //              uuuuuyyyyyyxxxxxxxxxx     (uuuuu=wwww+1)
-        cdpt = ((lo & Ob000000000001111111111)) |
-               ((hi & Ob00000111111)    << 10 ) |
-               ((hi & Ob01111000000)    << 10 ) +
-               ((     Ob00001000000)    << 10 ) ;
-    } else if (!hisurrogate && !losurrogate) {
-        // Neither of this pair is a surrogate; lo should be a valid code
-        // point in the Basic Multilingual Plane, so return that. 
-        cdpt = lo;
-    } else {
-        // One of them is a surrogate but not both; we have an encoding
-        // error. Return a question mark as a placeholder. 
-        cdpt = '?';
-    }
-    FUNC_RETURN(cdpt);
-}
-
-
 
 
 

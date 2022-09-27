@@ -5,32 +5,21 @@
 // to conduct unit tests on static functions
 #include "../rtfsed.c"
 
-#define ENCOD(x,y) (utf8_from_cdpt(y,x))
-#define CHECK(x,y) (assert(STREQ(x,y)))
-#define STREQ(x,y) (!strcmp(x,y))
+#define ENCOD(x)   (utf8_from_cdpt(x))
+#define CHECK(x,y) (assert(STREQ(utf8_from_cdpt(x),y)))
+#define STREQ(x,y) (!strcmp((const char *)x,(const char *)y))
 
 int main(void) {
-    char s[5];
+    unsigned char *s;
 
-    ENCOD(s, 97);
-    CHECK(s, u8"a");
+    CHECK(97,      u8"a");
+    CHECK(0x1F600, u8"😀");
+    CHECK(0x1F608, u8"😈");
+    CHECK(0x2000B, u8"𠀋");
+    CHECK(0x2B8B8, u8"𫢸");
+    CHECK(0x0000,  u8"\0");
 
-    ENCOD(s, 0x1F600);
-    CHECK(s, u8"😀");
-
-    ENCOD(s, 0x1F608);
-    CHECK(s, u8"😈");
-
-    ENCOD(s, 0x2000B);
-    CHECK(s, u8"𠀋");
-
-    ENCOD(s, 0x2B8B8);
-    CHECK(s, u8"𫢸");
-
-    ENCOD(s, 0x0000);
-    CHECK(s, u8"\0");
-
-    ENCOD(s, (0 - 0x7FFFFFFF));
+    s = ENCOD(0 - 0x7FFFFFFF);
     if (!STREQ(s, u8"\0")) {
         fprintf(stderr, "Strings not equal! ");
         fprintf(stderr, "s is { ");
@@ -40,7 +29,7 @@ int main(void) {
         exit(1);
     }
 
-    ENCOD(s, (int32_t)0xFFFFFFFF);
+    s = ENCOD((int32_t)0xFFFFFFFF);
     if (!STREQ(s, u8"\0")) {
         fprintf(stderr, "Strings not equal! \'%s\' =/= \'%s\'\n", s, u8"\0");
         fprintf(stderr, "s is { ");
