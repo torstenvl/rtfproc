@@ -3,7 +3,7 @@
 #include <string.h>
 // including the source file is necessary
 // to conduct unit tests on static functions
-#include "../rtfsed.c"
+#include "rtfsed.c"
 
 #define ENCOD(x)   (utf8_from_cdpt(x))
 #define CHECK(x,y) (assert(STREQ(utf8_from_cdpt(x),y)))

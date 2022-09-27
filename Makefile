@@ -4,6 +4,7 @@
 EXEC	:=	$(shell basename `pwd`)
 HDR		:=	$(wildcard *.h)
 SRC		:=	$(wildcard *.c)
+LIBDIR  :=	$(wildcard STATIC/*)
 LIBSRC  :=	$(wildcard STATIC/*/*.c)
 LIBHDR  :=	$(wildcard STATIC/*/*.h)
 ALLSRC	:=	$(SRC) $(LIBSRC)
@@ -24,7 +25,7 @@ else
 	OPTFLAG		:=	-Oz
 	DBUGFLAG	:=	-gfull -O0
 	WEXCLUDE	:=	-Wno-gnu-binary-literal -Wno-c++98-compat -Wno-padded \
-	                -Wno-c99-compat -Wno-poison-system-directories \
+	                -Wno-c99-compat -Wno-poison-system-directories        \
 					-Wno-unused-function
 	WEVERYTHING	:=	-Wextra -Weverything 
 endif
@@ -33,16 +34,16 @@ CFLAGS	:= -std=c11 -funsigned-char
 RELEASE	:= $(CFLAGS) $(OPTFLAG) -DNDEBUG
 DEBUG	:= $(CFLAGS) $(DBUGFLAG)
 STRICT1	:= -W -Wall 
-STRICT2	:= $(STRICT1) -Werror -pedantic                                  \
-		   -Wstrict-prototypes -Wmissing-prototypes -Wchar-subscripts    \
-		   -Wpointer-arith -Wcast-qual -Wswitch -Wshadow -Wcast-align    \
-		   -Wreturn-type -Wwrite-strings -Winline -Wredundant-decls      \
+STRICT2	:= $(STRICT1) -Werror -pedantic                                   \
+		   -Wstrict-prototypes -Wmissing-prototypes -Wchar-subscripts     \
+		   -Wpointer-arith -Wcast-qual -Wswitch -Wshadow -Wcast-align     \
+		   -Wreturn-type -Wwrite-strings -Winline -Wredundant-decls       \
 		   -Wmisleading-indentation -Wunused-parameter -Wnested-externs 
 STRICT3	:= $(STRICT2) $(WEVERYTHING)
 
 
 #=============================================================================
-#                BUILD TARGETS AND FOUNDATIONAL TESTING HARNESS
+#                                BUILD TARGETS
 #=============================================================================
 .PHONY:     release debug strict stricter strictest clean test
 .PHONY:     stackdebug demo 
@@ -74,11 +75,13 @@ clean:
 #                                 TEST HARNESS
 #=============================================================================
 TESTTGT		:=	TEST/testexec
-TESTCC		:=	$(CC) $(RELEASE) $(STRICT3) $(WEXCLUDE) -I.
+TESTDIR  	:=	$(wildcard TEST)
+TESTINCL	:=	-I. $(subst STATIC,-I./STATIC,$(LIBDIR)) $(subst TEST,-I./TEST,$(TESTDIR))
+TESTCC		:=	$(CC) $(RELEASE) $(STRICT3) $(WEXCLUDE) $(TESTINCL)
 SUCCESS		:=	"\342\234\205 OK\n"
 FAILURE		:=	"\342\235\214\033[1;31m FAILED!!!\033[m\n"
 TESTEND		:=	printf $(SUCCESS) || printf $(FAILURE)
-TESTSTART	=	printf "%s %-36s" "Testing" $(subst test_,,$@)
+TESTSTART	=	printf "%s %-36s" "Testing" $(subst test_,,$@...)
 test:		testsuiteprologue testsuite testsuiteepilogue
 testsuiteprologue:
 	@printf "\nRUNNING TEST SUITE\n——————————————————\n"
@@ -115,11 +118,6 @@ test_speedtest:
 	@$(TESTCC) $(ALLSRC) -o $(TESTTGT)
 	@strip $(TESTTGT)
 	@echo
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
 	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
 	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
 	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf

@@ -3,8 +3,8 @@
 #include <string.h>
 // including the source file is necessary
 // to conduct unit tests on static functions
-#include "../rtfsed.c"
-#include "../STATIC/cpgtou/cpgtou.h"
+#include "rtfsed.c"
+#include "cpgtou.h"
 
 static unsigned char input[] = { 0x94, 0x45, 0x8e, 0xd2, 0x90, 0xed, 0x8e, 
                                  0x6d, 0x82, 0xaa, 0x8e, 0x98, 0x82, 0xf0, 
