@@ -738,7 +738,7 @@ static void add_string_to_raw(const char *s, rtfobj *R) {
     if (R->ri+strlen(s) >= R->rawz) {
         DBUG("Exhausted raw buffer.");
         DBUG("R->ri = %zu. Last raw data: \'%s\'", R->ri, &R->raw[R->ri-80]);
-        LOG("No match within limits. Flushing buffers, trying to recover.");
+        // LOG("No match within limits. Flushing buffers, trying to recover.");
         output_raw(R);
         reset_raw_buffer(R);
         reset_txt_buffer(R);
