@@ -12,17 +12,33 @@ ALLHDR  :=  $(HDR) $(LIBHDR)
 
 
 #=============================================================================
-#                                COMPILER FLAGS
+#                          OS-SPECIFIC CONFIGURATION
 #=============================================================================
-ifeq ($(shell cc -v 2>&1 | grep clang),"")
+ifeq ($(shell uname -s),Linux)
+    TIME         :=  /usr/bin/time --format "\t%e real\t%U user\t%S sys"
+	OPEN         :=  xdg-open
+else ifeq ($(shell uname -s),FreeBSD)
+    TIME         :=  /usr/bin/time
+	OPEN         :=  xdg-open
+else ifeq ($(shell uname -s),Darwin)
+    TIME         :=  /usr/bin/time
+	OPEN         :=  open
+endif
+
+
+#=============================================================================
+#                       COMPILER-SPECIFIC CONFIGURATION
+#=============================================================================
+ifeq ($(shell cc -v 2>&1 | grep clang),)
     CC           :=  gcc
-    OPTFLAG      :=  -Os
+    OPTFLAG      :=  -DNDEBUG -Os
     DBUGFLAG     :=  -pg -O0
-    WEXCLUDE     :=  -Wno-parentheses -Wno-padded -Wno-unused-value
+    WEXCLUDE     :=  -Wno-parentheses -Wno-padded -Wno-unused-value        \
+                     -Wno-unused-function
     WEVERYTHING  :=  -Wextra
 else
     CC           :=  clang
-    OPTFLAG      :=  -Oz
+    OPTFLAG      :=  -DNDEBUG -Oz
     DBUGFLAG     :=  -gfull -O0
     WEXCLUDE     :=  -Wno-gnu-binary-literal -Wno-c++98-compat -Wno-padded \
                      -Wno-c99-compat -Wno-poison-system-directories        \
@@ -30,16 +46,20 @@ else
     WEVERYTHING  :=  -Wextra -Weverything
 endif
 
-CFLAGS   :=  -std=c11 -funsigned-char $(ADDFLAGS) # For command line users
-RELEASE  :=  $(CFLAGS) $(OPTFLAG) -DNDEBUG
+
+#=============================================================================
+#                                 BUILD FLAGS
+#=============================================================================
+CFLAGS   :=  -funsigned-char $(subst STATIC,-I./STATIC,$(LIBDIR)) $(ADDFLAGS)
+RELEASE  :=  $(CFLAGS) $(OPTFLAG)
 DEBUG    :=  $(CFLAGS) $(DBUGFLAG)
 STRICT1  :=  -W -Wall
-STRICT2  :=  $(STRICT1) -Werror -pedantic                                  \
+STRICT2  :=  $(STRICT1) -pedantic                                          \
              -Wstrict-prototypes -Wmissing-prototypes -Wchar-subscripts    \
              -Wpointer-arith -Wcast-qual -Wswitch -Wshadow -Wcast-align    \
              -Wreturn-type -Wwrite-strings -Winline -Wredundant-decls      \
              -Wmisleading-indentation -Wunused-parameter -Wnested-externs
-STRICT3  :=  $(STRICT2) $(WEVERYTHING)
+STRICT3  :=  $(STRICT2) $(WEVERYTHING) -Werror 
 
 
 #=============================================================================
@@ -58,9 +78,9 @@ stackdebug: $(ALLSRC) $(ALLHDR)
 strict:     $(ALLSRC) $(ALLHDR)
 	@$(CC)  $(ALLSRC) $(RELEASE) $(STRICT1) $(WEXCLUDE) -o $(EXEC)
 stricter:   $(ALLSRC) $(ALLHDR)
-	@$(CC)  $(ALLSRC) $(RELEASE) $(STRICT1) $(WEXCLUDE) -o $(EXEC)
+	@$(CC)  $(ALLSRC) $(RELEASE) $(STRICT2) $(WEXCLUDE) -o $(EXEC)
 strictest:  $(ALLSRC) $(ALLHDR)
-	@$(CC)  $(ALLSRC) $(RELEASE) $(STRICT1) $(WEXCLUDE) -o $(EXEC)
+	@$(CC)  $(ALLSRC) $(RELEASE) $(STRICT3) $(WEXCLUDE) -o $(EXEC)
 demo: $(ALLSRC) $(ALLHDR)
 	@$(CC)  $(ALLSRC) $(RELEASE) -DRTFAUTOOPEN          -o $(EXEC)
 	@strip  $(EXEC)
@@ -76,7 +96,7 @@ clean:
 #=============================================================================
 TESTTGT    :=  TEST/testexec
 TESTDIR    :=  $(wildcard TEST)
-TESTINCL   :=  -I. $(subst STATIC,-I./STATIC,$(LIBDIR)) $(subst TEST,-I./TEST,$(TESTDIR))
+TESTINCL   :=  -I. $(subst TEST,-I./TEST,$(TESTDIR))
 TESTCC     :=  $(CC) $(RELEASE) $(STRICT3) $(WEXCLUDE) $(TESTINCL)
 SUCCESS    :=  "\342\234\205 OK\n"
 FAILURE    :=  "\342\235\214\033[1;31m FAILED!!!\033[m\n"
@@ -114,24 +134,24 @@ test_cpgtoutest: $(LIBSRC) TEST/cpgtoutest.c
 	@$(TESTTGT) && $(TESTEND)
 	@rm $(TESTTGT)
 
-test_speedtest:
+test_speedtest: $(ALLSRC) $(ALLHDR)
 	@$(TESTSTART)
 	@$(TESTCC) $(ALLSRC) -o $(TESTTGT)
 	@strip $(TESTTGT)
 	@echo
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@time $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
+	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
 	@rm $(TESTTGT) temp.rtf

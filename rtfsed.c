@@ -54,9 +54,9 @@
 #include <errno.h>
 #include <assert.h>
 #include "rtfsed.h"
-#include "STATIC/trex/trex.h"
-#include "STATIC/cpgtou/cpgtou.h"
-#include "STATIC/utillib/utillib.h"
+#include "trex.h"
+#include "cpgtou.h"
+#include "utillib.h"
 
 // Internal function declarations
 static void dispatch_scope(int c, rtfobj *R);
@@ -186,7 +186,7 @@ void rtfreplace(rtfobj *R) {
     int c;
 
     // Loop until we reach the end of the input file
-    while ((c = fgetc(R->fin)) != EOF) {
+    while ((c = getc_unlocked(R->fin)) != EOF) {
         switch (c) {
             case '{':           dispatch_scope(c, R);      break;
             case '}':           dispatch_scope(c, R);      break;

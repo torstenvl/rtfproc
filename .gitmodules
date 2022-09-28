@@ -4,9 +4,6 @@
 [submodule "STATIC/utillib"]
 	path = STATIC/utillib
 	url = https://github.com/torstenvl/utillib
-[submodule "crex"]
-	path = crex
-	url = https://github.com/torstenvl/crex
 [submodule "STATIC/crex"]
 	path = STATIC/crex
 	url = https://github.com/torstenvl/crex

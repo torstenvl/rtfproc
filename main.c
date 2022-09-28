@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 #include <ctype.h>
 #include "rtfsed.h"
 #include "STATIC/cpgtou/cpgtou.h"
@@ -9,30 +8,32 @@
 
 #define VALIDSTRING(x) (strlen(x) > 0)
 
-#if defined( RTFAUTOOPEN )
-  #define RTFINFILE   "TEST/rtfprocess-input.rtf"
-  #define RTFOUTFILE  "TEST/rtfprocess-output.rtf"
-  #if defined( OS_MAC )
-    #define OPENCMD     "open TEST/rtfprocess-output.rtf"
-  #elif defined( OS_LINUX ) ||  defined( OS_BSD )
-    #define OPENCMD     "xdg-open TEST/rtfprocess-output.rtf"
-  #elif defined( OS_WIN )
-    #define OPENCMD     "start TEST/rtfprocess-output.rtf"
-  #endif
-#else
-#define RTFINFILE   ""
-#define RTFOUTFILE  ""
-#define OPENCMD     ""
-#define system(...) ((void)0)
+#if   defined(RTFAUTOOPEN)
+
+#if   defined(__APPLE__)
+#define RTFINFILE  "TEST/rtfprocess-input.rtf"
+#define RTFOUTFILE "TEST/rtfprocess-output.rtf"
+#define OPENCMD    "open TEST/rtfprocess-output.rtf"
+#elif defined(__unix__)
+#define RTFINFILE  "TEST/rtfprocess-input.rtf"
+#define RTFOUTFILE "TEST/rtfprocess-output.rtf"
+#define OPENCMD    "xdg-open TEST/rtfprocess-output.rtf"
+#endif
+
+#else 
+
+#define RTFINFILE  ((argc>=2) ? argv[1] : "")
+#define RTFOUTFILE ((argc>=3) ? argv[2] : "")
+#define OPENCMD    "true"
+
 #endif
 
 int main(int argc, char **argv) {
     rtfobj *R;
     FILE *fin = stdin;
     FILE *fout = stdout;
-
-    const char *finname  = (argc>=2) ? argv[1] : RTFINFILE;
-    const char *foutname = (argc>=3) ? argv[2] : RTFOUTFILE;
+    const char *finname  = RTFINFILE;
+    const char *foutname = RTFOUTFILE;
 
     if (VALIDSTRING(finname)) {
         (fin = fopen(finname, "rb")) || DIE("Could not read file \'%s\'\n", finname);
@@ -68,7 +69,8 @@ int main(int argc, char **argv) {
     if (fout != stdout) fclose(fout);
 
     if (VALIDSTRING(OPENCMD)) {
-        system(OPENCMD);
+        int ret = system(OPENCMD);
+        ret=ret^ret;
     }
 
     return 0;
