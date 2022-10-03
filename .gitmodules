@@ -4,6 +4,6 @@
 [submodule "STATIC/utillib"]
 	path = STATIC/utillib
 	url = https://github.com/torstenvl/utillib
-[submodule "STATIC/crex"]
-	path = STATIC/crex
-	url = https://github.com/torstenvl/crex
+[submodule "STATIC/trex"]
+	path = STATIC/trex
+	url = https://github.com/torstenvl/trex

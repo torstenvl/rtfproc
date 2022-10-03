@@ -16,30 +16,30 @@ ALLHDR  :=  $(HDR) $(LIBHDR)
 #=============================================================================
 ifeq ($(shell uname -s),Linux)
     TIME         :=  /usr/bin/time --format "\t%e real\t%U user\t%S sys"
-	OPEN         :=  xdg-open
+    OPEN         :=  xdg-open
 else ifeq ($(shell uname -s),FreeBSD)
     TIME         :=  /usr/bin/time
-	OPEN         :=  xdg-open
+    OPEN         :=  xdg-open
 else ifeq ($(shell uname -s),Darwin)
     TIME         :=  /usr/bin/time
-	OPEN         :=  open
+    OPEN         :=  open
 endif
 
 
 #=============================================================================
 #                       COMPILER-SPECIFIC CONFIGURATION
 #=============================================================================
-ifeq ($(shell cc -v 2>&1 | grep clang),)
+ifeq ($(shell cc -v 2>&1 | grep clang),"")
     CC           :=  gcc
     OPTFLAG      :=  -DNDEBUG -Os
-    DBUGFLAG     :=  -pg -O0
+    DBUGFLAG     :=  -pg -Ofast
     WEXCLUDE     :=  -Wno-parentheses -Wno-padded -Wno-unused-value        \
                      -Wno-unused-function
     WEVERYTHING  :=  -Wextra
 else
     CC           :=  clang
-    OPTFLAG      :=  -DNDEBUG -Oz
-    DBUGFLAG     :=  -gfull -O0
+    OPTFLAG      :=  -DNDEBUG -Ofast
+    DBUGFLAG     :=  -gfull -Ofast
     WEXCLUDE     :=  -Wno-gnu-binary-literal -Wno-c++98-compat -Wno-padded \
                      -Wno-c99-compat -Wno-poison-system-directories        \
                      -Wno-unused-function
@@ -108,36 +108,33 @@ testsuiteprologue:
 	@printf "\nRUNNING TEST SUITE\n——————————————————\n"
 testsuiteepilogue:
 	@printf "\n\n"
+	@rm $(TESTTGT)
 
 
 #=============================================================================
 #                                    TESTS
 #=============================================================================
-testsuite: test_rtfprocess test_utf8test test_cpgtoutest test_speedtest
+testsuite: test_utf8test test_cpgtoutest test_rtfprocess test_speedtest
 
 test_rtfprocess: $(ALLSRC) $(ALLHDR)
 	@$(TESTSTART)
 	@$(TESTCC) $(ALLSRC) -o $(TESTTGT)
-	@$(TESTTGT) < TEST/rtfprocess-input.rtf > test_result.tmp
-	@diff test_result.tmp TEST/rtfprocess-correct.rtf > /dev/null && $(TESTEND)
-	@rm $(TESTTGT) test_result.tmp
+	@strip $(TESTTGT)
+	@$(TESTTGT) TEST/rtfprocess-input.rtf test_result.rtf
+	@diff test_result.rtf TEST/rtfprocess-correct.rtf > /dev/null && $(TESTEND)
 
 test_utf8test: $(LIBSRC) TEST/utf8test.c
 	@$(TESTSTART)
 	@$(TESTCC) $(LIBSRC) TEST/utf8test.c -o $(TESTTGT)
 	@$(TESTTGT) && $(TESTEND)
-	@rm $(TESTTGT)
 
 test_cpgtoutest: $(LIBSRC) TEST/cpgtoutest.c
 	@$(TESTSTART)
 	@$(TESTCC) $(LIBSRC) TEST/cpgtoutest.c -o $(TESTTGT)
 	@$(TESTTGT) && $(TESTEND)
-	@rm $(TESTTGT)
 
 test_speedtest: $(ALLSRC) $(ALLHDR)
 	@$(TESTSTART)
-	@$(TESTCC) $(ALLSRC) -o $(TESTTGT)
-	@strip $(TESTTGT)
 	@echo
 	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
 	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
@@ -149,9 +146,4 @@ test_speedtest: $(ALLSRC) $(ALLHDR)
 	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
 	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
 	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@rm $(TESTTGT) temp.rtf
+	@diff TEST/bigfile-input.rtf temp.rtf && rm temp.rtf || echo "FILES DON'T MATCH!" 

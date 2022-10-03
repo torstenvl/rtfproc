@@ -1,47 +1,30 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
 #include "rtfsed.h"
-#include "STATIC/cpgtou/cpgtou.h"
-#include "STATIC/utillib/utillib.h"
+#include "cpgtou.h"
+#include "utillib.h"
 
-#define VALIDSTRING(x) (strlen(x) > 0)
-
-#if   defined(RTFAUTOOPEN)
-
-#if   defined(__APPLE__)
+#if defined(RTFAUTOOPEN) && defined(__APPLE__)
 #define RTFINFILE  "TEST/rtfprocess-input.rtf"
 #define RTFOUTFILE "TEST/rtfprocess-output.rtf"
 #define OPENCMD    "open TEST/rtfprocess-output.rtf"
-#elif defined(__unix__)
+#elif defined(RTFAUTOOPEN) && defined(__unix__)
 #define RTFINFILE  "TEST/rtfprocess-input.rtf"
 #define RTFOUTFILE "TEST/rtfprocess-output.rtf"
 #define OPENCMD    "xdg-open TEST/rtfprocess-output.rtf"
-#endif
-
 #else 
-
-#define RTFINFILE  ((argc>=2) ? argv[1] : "")
-#define RTFOUTFILE ((argc>=3) ? argv[2] : "")
-#define OPENCMD    "true"
-
+#define RTFINFILE  "TEST/bigfile-input.rtf"
+#define RTFOUTFILE "TEST/bigfile-output.rtf"
 #endif
 
 int main(int argc, char **argv) {
     rtfobj *R;
-    FILE *fin = stdin;
-    FILE *fout = stdout;
-    const char *finname  = RTFINFILE;
-    const char *foutname = RTFOUTFILE;
+    FILE *fin;
+    FILE *fout;
+    const char *finname  = ((argc>=2) ? argv[1] : RTFINFILE);
+    const char *foutname = ((argc>=3) ? argv[2] : RTFOUTFILE);
 
-    if (VALIDSTRING(finname)) {
-        (fin = fopen(finname, "rb")) || DIE("Could not read file \'%s\'\n", finname);
-    } 
-
-    if (VALIDSTRING(foutname)) {
-        (fout = fopen(foutname, "wb")) || DIE("Could not write to file \'%s\'\n", foutname);
-    } 
+    (fin = fopen(finname, "rb"))   || DIE("Could not read file \'%s\'\n", finname);
+    (fout = fopen(foutname, "wb")) || DIE("Could not write to file \'%s\'\n", foutname);
 
     setvbuf(fin, NULL, _IOFBF,  (1<<21));
     setvbuf(fout, NULL, _IOFBF, (1<<21));
@@ -58,6 +41,7 @@ int main(int argc, char **argv) {
         "«Client Rank»",             "Colonel",
         "«Client Full Name»",        "Chesty A. Puller",
         "«Client Last Name»",        "Puller",
+        "こんにちは！",                "Bonjour.",
         NULL 
     };
 
@@ -65,13 +49,12 @@ int main(int argc, char **argv) {
     rtfreplace(R);
     delete_rtfobj(R);
 
-    if (fin != stdin) fclose(fin);
+    if (fin != stdin)   fclose(fin);
     if (fout != stdout) fclose(fout);
 
-    if (VALIDSTRING(OPENCMD)) {
-        int ret = system(OPENCMD);
-        ret=ret^ret;
-    }
+    #if defined(RTFAUTOOPEN)
+    system(OPENCMD);
+    #endif
 
     return 0;
 }
