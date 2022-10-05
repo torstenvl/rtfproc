@@ -1,33 +1,25 @@
 // --------------------------------------------------------------------------
-// TODO
+// HIGH PRIORITY TODO
+//
+//   - In output_match(), convert non-ASCII to appropriate RTF \u and \' code
+//
+//   - Factor out pattern matching and output from top level functions; will
+//     need to support OTHER forms of processing the RTF file (e.g., finding
+//     out spans of certain characters; extracting and outputting text; etc.)
+//
+// LOW PRIORITY TODO
+//
+//   - Sort search keys for perf reasons? 
+//
+//   - Implement file locking on construction (or just tell users to not
+//     fucking modify the file in the middle of operation)
+//
+//   - Refactor output function to output raw to fout AND output text to
+//     ftxt, assuming one or both exist. 
+//
 //   - Normalize replacement tokens as well as any Unicode in the text before
 //     comparison.  Use NFC normalization.
 //
-//   - Add support for late partial matches. Example:
-//         Replacements
-//             "ATTORNEY"     => "Mr. Smith"
-//             "TORTLOCATION" => "Colorado Springs"
-//         Text has
-//             "THEY MET ATTORTLOCATION..." [sic]
-//         Problem (Portmanteaus)
-//             The partial match ATTOR will be invalidated and flushed when
-//             we get ATTORT, and a new comparison will start with LOCATION.
-//             The match for TORTLOCATION will never be found.
-//         Solution
-//             Brute Force: Iterate for each replacement individually.
-//
-//             Better: Upon failing a match with ti > 1, ungetc() all of the
-//             raw buffer and increment uc0i IOT skip an output byte IOT avoid
-//             the same partial match we just invalidated.
-//
-//             Best (?): Use a parallel array of size_ts to map each byte of
-//             txt[] to the index in raw[] where it starts, i.e., the code
-//             that results in txt[i] starts at raw[txtrawmap[i]]. Then,
-//             when we invalidate a match, loop i from 0 to ti, checking if
-//               !strncmp(&R->txt[i], R->srch_key[__], R->ti-i)
-//             Then we can output raw[0] through raw[txtrawmap[i]], and
-//             memmove() raw[] and txt[] (and adjust ri and ti) to begin
-//             processing our new partial match.
 // --------------------------------------------------------------------------
 
 
@@ -69,23 +61,28 @@ static void push_attr(rtfobj *R);
 static void pop_attr(rtfobj *R);
 static int  pattern_match(rtfobj *R);
 static void output_match(rtfobj *R);
-static void output_raw(rtfobj *R);
+static void output_raw_by(rtfobj *R, size_t amt);
 static void add_to_txt(int c, rtfobj *R);
 static void add_string_to_txt(const char *s, rtfobj *R);
 static void add_to_cmd(int c, rtfobj *R);
 static void add_to_raw(int c, rtfobj *R);
 static void add_string_to_raw(const char *s, rtfobj *R);
-static void reset_raw_buffer(rtfobj *R);
-static void reset_txt_buffer(rtfobj *R);
-static void reset_cmd_buffer(rtfobj *R);
+static void reset_raw_buffer_by(rtfobj *R, size_t amt);
+static void reset_txt_buffer_by(rtfobj *R, size_t amt);
+static void reset_cmd_buffer_by(rtfobj *R, size_t amt);
 static int32_t get_num_arg(const char *s);
 static uint8_t get_hex_arg(const char *s);
 
-#define RGX_MATCH(x, y)    (regexmatch((const unsigned char *) y, (const unsigned char *) x))
-#define CHR_MATCH(x, y)    (x[0] == y && x[1] == 0)
+#define RGX_MATCH(x, y)      (regexmatch((const unsigned char *) y, (const unsigned char *) x))
+#define CHR_MATCH(x, y)      (x[0] == y && x[1] == 0)
 
-#define fgetc(x)           getc_unlocked(x)
-#define putc(x, y)         putc_unlocked(x, y)
+#define fgetc(x)             getc_unlocked(x)
+#define putc(x, y)           putc_unlocked(x, y)
+#define reset_raw_buffer(R)  reset_raw_buffer_by(R, R->ri)
+#define reset_txt_buffer(R)  reset_txt_buffer_by(R, R->ti)
+#define reset_cmd_buffer(R)  reset_cmd_buffer_by(R, R->ci)
+#define output_raw(R)        output_raw_by(R, R->ri)
+
 
 /////////////////////////////////////////////////////////////////////////////
 ////                                                                     ////
@@ -93,7 +90,7 @@ static uint8_t get_hex_arg(const char *s);
 ////                                                                     ////
 /////////////////////////////////////////////////////////////////////////////
 
-rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **srch) {
+rtfobj *new_rtfobj(FILE *fin, FILE *fout, FILE *ftxt, const char **srch) {
     FUNC_ENTER;
     size_t i;
     rtfobj *R = malloc(sizeof *R);
@@ -106,6 +103,11 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **srch) {
     // Set up file streams
     R->fin  = fin;
     R->fout = fout;
+    R->ftxt = ftxt;
+
+    setvbuf(R->fin,  NULL, _IOFBF, (1<<21));
+    if (R->fout) setvbuf(R->fout, NULL, _IOFBF, (1<<21));
+    if (R->ftxt) setvbuf(R->ftxt, NULL, _IOFBF, (1<<21));
 
     R->rawz = RAW_BUFFER_SIZE;
     R->txtz = TXT_BUFFER_SIZE;
@@ -176,18 +178,7 @@ void rtfreplace(rtfobj *R) {
             default:            dispatch_text(c, R);       break;
         }
 
-        // MAYBETODO: Replace with a generalized callback system
-        if (R->ti>0 && !R->attr->notxt) {
-            switch (pattern_match(R)) {
-                case PARTIAL:        /* Keep reading */        break;
-                case MATCH:          output_match(R);
-                                     reset_raw_buffer(R);
-                                     reset_txt_buffer(R);      break;
-                case NOMATCH:        output_raw(R);
-                                     reset_raw_buffer(R);
-                                     reset_txt_buffer(R);      break;
-            }
-        }
+        pattern_match(R);
 
         if (R->fatalerr) { FUNC_VOID_DIE("Encountered a fatal error"); }
     }
@@ -278,34 +269,50 @@ static void dispatch_text(int c, rtfobj *R) {
 
 static int pattern_match(rtfobj *R) {
     FUNC_ENTER;
-    size_t i, j;
-    int partialmatch = 0;
+    size_t offset;
+    size_t curkey;
+    size_t i;
 
-    // Check each replacement pair for a match against R->txt
-    for (i = 0; i < R->srchz; i++) {
+    if (R->ti < 1 || R->attr->notxt) FUNC_RETURN(PARTIAL);
 
-        // Inline early-fail strcmp. Library function is slow on macOS.
-        // j = first non-matching character (or index of \0 for both)
-        for (j = 0;
-                    R->txt[j] == R->srch_key[i][j]  &&
-                    R->txt[j]           !=   '\0'    ;
-                                                      j++);
+    for (offset = 0; offset < R->ti; offset++) {
+        for (curkey = 0; curkey < R->srchz; curkey++) {
 
-        if (R->txt[j] == R->srch_key[i][j]) { // Therefore both '\0'
-            // We reached the end of BOTH strings finding a mis-match, so...
-            // the entirety of both strings must match.
-            R->srch_match = i;
-            FUNC_RETURN(MATCH);
-        }
-        else if (R->txt[j] == '\0') { // Not both '\0' but txt[j] is '\0'
-            // Reached the end of the text buffer (the data we've read in so
-            // far) without finding a mismatch, but haven't reached the end
-            // of the replacement key. That means it's a partial match.
-            partialmatch = 1;
+            // Inline early-fail strcmp. Library function is slow on macOS.
+            // j = first non-matching character (or index of \0 for both)
+            for (i = 0; R->txt[offset+i] == R->srch_key[curkey][i] && R->txt[offset+i] != '\0'; i++);
+
+            if (R->txt[offset+i] == R->srch_key[curkey][i]) { // Therefore both '\0'
+                // We reached the end of BOTH strings finding a mis-match, so...
+                // the entirety of both strings at this offset must match.
+                if (offset > 0) {
+                    output_raw_by(R, R->txtrawmap[ offset ]);
+                    reset_raw_buffer_by(R, R->txtrawmap[ offset ]);
+                    reset_txt_buffer_by(R, offset);
+                }
+                R->srch_match = curkey;
+                output_match(R);
+                reset_raw_buffer(R);
+                reset_txt_buffer(R);
+                FUNC_RETURN(MATCH);
+            }
+            else if (R->txt[offset+i] == '\0') { // Not both '\0' but txt[j] is '\0'
+                // Reached the end of the text buffer (the data we've read in so
+                // far) without finding a mismatch, but haven't reached the end
+                // of the replacement key. That means it's a partial match.
+                if (offset > 0) {
+                    output_raw_by(R, R->txtrawmap[ offset ]);
+                    reset_raw_buffer_by(R, R->txtrawmap[ offset ]);
+                    reset_txt_buffer_by(R, offset);
+                }
+                FUNC_RETURN(PARTIAL);
+            }
         }
     }
 
-    if (partialmatch) FUNC_RETURN(PARTIAL);
+    output_raw(R);
+    reset_raw_buffer(R);
+    reset_txt_buffer(R);
     FUNC_RETURN(NOMATCH);
 }
 
@@ -345,7 +352,7 @@ static void read_command(rtfobj *R) {
 
             // Check if next character is a newline, to avoid double newlines
             // for platforms with CRLF line terminators.
-            if ((c=fgetc(R->fin)) == EOF) { FUNC_VOID_DIE("EOF after carriage return"); R->fatalerr = EIO; break; }
+            if ((c=fgetc(R->fin)) == EOF) { FUNC_VOID_DIE("EOF after \\\\r"); R->fatalerr = EIO; break; }
 
             if (c == '\n') {
                 add_to_cmd(c, R);
@@ -366,12 +373,13 @@ static void read_command(rtfobj *R) {
 
             break;
         default:
-            if (!isalnum(c)) { LOG("Invalid command format..."); R->fatalerr = EINVAL; break; }
+            if (!isalnum(c)) { LOG("Invalid command format |%s|...", R->cmd); LOG("Raw is |%s|", R->raw); R->fatalerr = EINVAL; break; }
             add_to_cmd(c, R);
 
             // Greedily add input bytes to command buffer, so long as they're valid
-            while(isalnum(c = fgetc(R->fin))) {
-                add_to_cmd(c, R);
+            while ((c = fgetc(R->fin)) != EOF) {
+                if (isalnum(c) || c == '-') add_to_cmd(c, R);
+                else break;
             }
 
             // Stopped getting valid command bytes. What now? Depends on if it's an EOF
@@ -413,6 +421,7 @@ static void proc_command(rtfobj *R) {
     else if (RGX_MATCH(c,"^colortbl ?$"))      proc_cmd_shuntblock(R);
     else if (RGX_MATCH(c,"^stylesheet ?$"))    proc_cmd_shuntblock(R);
     else if (RGX_MATCH(c,"^operator ?$"))      proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^author ?$"))        proc_cmd_shuntblock(R);
     else if (RGX_MATCH(c,"^bin ?$"))           proc_cmd_shuntblock(R);
     else                                       proc_cmd_unknown(R);
 
@@ -454,7 +463,7 @@ static void proc_cmd_u(rtfobj *R) {
     if (arg < 0) arg = arg + 65536;
 
     // RTF 1.9 Spec: RTF supports "[s]urrogate pairs like \u-10187?\u-9138?"
-    // Unicode 15.0, Sec. 23.6: The use of surrogate pairs... is formally
+    // Unicode 15.0, Sec. 23.6: "The use of surrogate pairs... is formally
     // equivalent to [what is] defined in ISO/IEC 10646.... The high-surrogate
     // code points are [in]] range U+D800..U+DBFF [and are always] the first
     // element of a surrogate pair.... The low-surrogate code points are [in]
@@ -487,8 +496,6 @@ static void proc_cmd_apostrophe(rtfobj *R) {
     uint8_t arg;
     const int32_t *mult = 0;
 
-    DBUG("Processing |%s|", R->cmd);
-
     if (R->attr->uc0i) { R->attr->uc0i--; FUNC_VOID_RETURN; }
 
     arg = get_hex_arg(R->cmd);
@@ -511,8 +518,11 @@ static void proc_cmd_apostrophe(rtfobj *R) {
 
     // If there's no match or the code page is unsupported, don't do anything
     // except emit a diagnostic message (if and only if we're in debug mode).
-    else if (cdpt < 0) {
-        DBUG("cpNONE or cpUNSP");
+    else if (cdpt == cpNONE) {
+        DBUG("cpNONE: Code point %d does not exist code page %d", arg, R->attr->codepage);
+    }
+    else if (cdpt == cpUNSP) {
+        DBUG("cpUNSP: Code page %d is unsupported", R->attr->codepage);
     }
 
     // Lastly, in the general case, convert the code point to UTF-8 and add
@@ -646,8 +656,7 @@ static void add_to_raw(int c, rtfobj *R) {
             DBUG("Exhausted raw buffer.");
             DBUG("R->ri = %zu. Last raw data: \'%s\'", R->ri, &R->raw[R->ri-80]);
             DBUG("No match within limits. Flushing buffers, attempting recovery");
-            memzero(R->txt, R->ti);
-            R->ti = 0UL;
+            reset_txt_buffer(R);
         }
         ////////////////////////////////////////////////////////////////////
         ////                         WALL OF SHAME                      ////
@@ -663,8 +672,7 @@ static void add_to_raw(int c, rtfobj *R) {
         // No wonder I was getting weird data corruption issues
         ////////////////////////////////////////////////////////////////////
         output_raw(R);
-        memzero(R->raw, R->ri);
-        R->ri = 0UL;
+        reset_raw_buffer(R);
     }
     R->raw[R->ri++] = (char)c;
     FUNC_VOID_RETURN;
@@ -702,7 +710,7 @@ static void add_to_txt(int c, rtfobj *R) {
 
         // Make sure we have enough space
         if (R->ti + 1   >=   R->txtz) {
-            LOG("No match within limits. Flushing buffers. R->ti = %zu. Last txt data: \'%s\'", R->ti, &R->txt[R->ti-80]);
+            // LOG("No match within limits. Flushing buffers. R->ti = %zu. Last txt data: \'%s\'", R->ti, &R->txt[R->ti-80]);
             output_raw(R);
             reset_raw_buffer(R);
             reset_txt_buffer(R);
@@ -712,7 +720,10 @@ static void add_to_txt(int c, rtfobj *R) {
         R->txtrawmap[ R->ti ]  =  R->ri;
     }
 
-    if (c == 0) { deferred = 1; FUNC_VOID_RETURN; }
+    if (c == 0) { 
+        deferred = 1; 
+        FUNC_VOID_RETURN; 
+    }
 
     R->txt[ R->ti++ ] = (char)c;
     deferred = 0;
@@ -774,28 +785,37 @@ static void add_string_to_raw(const char *s, rtfobj *R) {
 
 
 
-static void reset_raw_buffer(rtfobj *R) {
+static void reset_raw_buffer_by(rtfobj *R, size_t amt) {
     FUNC_ENTER;
-    memzero(R->raw, R->ri);
-    R->ri = 0UL;
+    size_t remaining = R->ri - amt;
+    memmove(R->raw, &R->raw[amt], remaining);
+    R->ri = remaining;
+    memzero(&R->raw[remaining], amt);
     FUNC_VOID_RETURN;
 }
 
 
 
-static void reset_txt_buffer(rtfobj *R) {
+static void reset_txt_buffer_by(rtfobj *R, size_t amt) {
     FUNC_ENTER;
-    memzero(R->txt, R->ti);
-    R->ti = 0UL;
+    size_t remaining = R->ti - amt;
+    // if (R->ftxt) {
+    //     fwrite(R->txt, 1, amt, R->ftxt);
+    // }
+    memmove(R->txt, &R->txt[amt], remaining);
+    R->ti = remaining;
+    memzero(&R->txt[remaining], amt);
     FUNC_VOID_RETURN;
 }
 
 
 
-static void reset_cmd_buffer(rtfobj *R) {
+static void reset_cmd_buffer_by(rtfobj *R, size_t amt) {
     FUNC_ENTER;
-    memzero(R->cmd, R->ci);
-    R->ci = 0UL;
+    size_t remaining = R->ci - amt;
+    memmove(R->cmd, &R->cmd[amt], remaining);
+    R->ci = remaining;
+    memzero(&R->cmd[remaining], amt);
     FUNC_VOID_RETURN;
 }
 
@@ -836,7 +856,7 @@ static void output_match(rtfobj *R) {
 
 
 
-static void output_raw(rtfobj *R) {
+static void output_raw_by(rtfobj *R, size_t amt) {
     FUNC_ENTER;
     // Previously tried looping through the R->raw buffer and using
     // putc_unlocked() to speed up performance; however, it's actually faster
@@ -845,7 +865,7 @@ static void output_raw(rtfobj *R) {
     // 10 iterations with fputc() takes .22 seconds +/- .01
     // 10 iterations with fwrite() takes .18 seconds +/- .01
     // I.e., fwrite() makes the program about 20% faster.
-    fwrite(R->raw, 1, R->ri, R->fout);
+    fwrite(R->raw, 1, amt, R->fout);
     FUNC_VOID_RETURN;
 }
 

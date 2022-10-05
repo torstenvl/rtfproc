@@ -38,7 +38,7 @@ ifeq ($(shell cc -v 2>&1 | grep clang),"")
     WEVERYTHING  :=  -Wextra
 else
     CC           :=  clang
-    OPTFLAG      :=  -DNDEBUG -Ofast
+    OPTFLAG      :=  -DNDEBUG -O3
     DBUGFLAG     :=  -gfull -Ofast
     WEXCLUDE     :=  -Wno-gnu-binary-literal -Wno-c++98-compat -Wno-padded \
                      -Wno-c99-compat -Wno-poison-system-directories        \
@@ -50,7 +50,7 @@ endif
 #=============================================================================
 #                                 BUILD FLAGS
 #=============================================================================
-CFLAGS   :=  -funsigned-char $(subst STATIC,-I./STATIC,$(LIBDIR)) $(ADDFLAGS)
+CFLAGS   :=  -funsigned-char -Wno-gnu-label-as-value $(subst STATIC,-I./STATIC,$(LIBDIR)) $(ADDFLAGS)
 RELEASE  :=  $(CFLAGS) $(OPTFLAG)
 DEBUG    :=  $(CFLAGS) $(DBUGFLAG)
 STRICT1  :=  -W -Wall
@@ -73,6 +73,14 @@ release:    $(ALLSRC) $(ALLHDR)
 	@strip  $(EXEC)
 debug:      $(ALLSRC) $(ALLHDR)
 	@$(CC)  $(ALLSRC) $(DEBUG)                          -o $(EXEC)
+perfrun:    $(ALLSRC) $(ALLHDR)
+	@$(CC)  $(ALLSRC) $(CFLAGS) $(OPTFLAG) $(DBUGFLAG)  -o ./perfrun
+	@strip  ./perfrun
+	@sample perfrun 30 1 -wait -mayDie -fullPaths -file /tmp/processsample.txt &
+	@./perfrun TEST/bigfile-input.rtf ./bigfile-output.rtf
+	@sleep 1
+	@$(OPEN) /tmp/processsample.txt
+	@rm perfrun ./bigfile-output.rtf
 stackdebug: $(ALLSRC) $(ALLHDR)
 	@$(CC)  $(ALLSRC) $(DEBUG)   -DUL__NEED_STACKTRACE  -o $(EXEC)
 strict:     $(ALLSRC) $(ALLHDR)
@@ -82,12 +90,12 @@ stricter:   $(ALLSRC) $(ALLHDR)
 strictest:  $(ALLSRC) $(ALLHDR)
 	@$(CC)  $(ALLSRC) $(RELEASE) $(STRICT3) $(WEXCLUDE) -o $(EXEC)
 demo: $(ALLSRC) $(ALLHDR)
-	@$(CC)  $(ALLSRC) $(RELEASE) -DRTFAUTOOPEN          -o $(EXEC)
-	@strip  $(EXEC)
-	@./$(EXEC)
+	@$(CC)  $(ALLSRC) $(RELEASE)                        -o $(EXEC)
+	@./$(EXEC) TEST/test-letter-input.rtf test-letter-output.rtf
+	@$(OPEN) rtfprocess-output.rtf
 clean:
 	@rm -Rf .DS_Store core *.o *~ *.dSYM/ */*.dSYM Info.plist */Info.plist
-	@rm -Rf *-output* TEST/*-output* $(EXEC) $(TESTTGT)
+	@rm -Rf *-output* TEST/*-output* temp.rtf *-output.rtf $(EXEC) $(TESTTGT)
 	@echo Repository cleaned
 
 
@@ -114,14 +122,14 @@ testsuiteepilogue:
 #=============================================================================
 #                                    TESTS
 #=============================================================================
-testsuite: test_utf8test test_cpgtoutest test_rtfprocess test_speedtest
+testsuite: test_utf8test test_cpgtoutest test_rtfprocess test_latepartialmatches test_speedtest
 
 test_rtfprocess: $(ALLSRC) $(ALLHDR)
 	@$(TESTSTART)
 	@$(TESTCC) $(ALLSRC) -o $(TESTTGT)
 	@strip $(TESTTGT)
-	@$(TESTTGT) TEST/rtfprocess-input.rtf test_result.rtf
-	@diff test_result.rtf TEST/rtfprocess-correct.rtf > /dev/null && $(TESTEND)
+	@$(TESTTGT) TEST/test-letter-input.rtf test-letter-output.rtf
+	@diff TEST/test-letter-correct.rtf test-letter-output.rtf > /dev/null && rm test-letter-output.rtf && $(TESTEND)
 
 test_utf8test: $(LIBSRC) TEST/utf8test.c
 	@$(TESTSTART)
@@ -133,9 +141,17 @@ test_cpgtoutest: $(LIBSRC) TEST/cpgtoutest.c
 	@$(TESTCC) $(LIBSRC) TEST/cpgtoutest.c -o $(TESTTGT)
 	@$(TESTTGT) && $(TESTEND)
 
+test_latepartialmatches: $(LIBSRC) TEST/latepartial.c rtfsed.c
+	@$(TESTSTART)
+	@$(TESTCC) $(LIBSRC) TEST/latepartial.c rtfsed.c -o $(TESTTGT)
+	@$(TESTTGT)
+	@diff TEST/test-latepartial-correct.rtf test-latepartial-output.rtf > /dev/null && rm test-latepartial-output.rtf && $(TESTEND)
+
 test_speedtest: $(ALLSRC) $(ALLHDR)
 	@$(TESTSTART)
 	@echo
+	@$(TESTCC) $(ALLSRC) -o $(TESTTGT)
+	@strip $(TESTTGT)
 	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
 	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
 	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf

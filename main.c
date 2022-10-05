@@ -1,33 +1,18 @@
 #include <stdio.h>
+#include <string.h>
 #include "rtfsed.h"
-#include "cpgtou.h"
 #include "utillib.h"
 
-#if defined(RTFAUTOOPEN) && defined(__APPLE__)
-#define RTFINFILE  "TEST/rtfprocess-input.rtf"
-#define RTFOUTFILE "TEST/rtfprocess-output.rtf"
-#define OPENCMD    "open TEST/rtfprocess-output.rtf"
-#elif defined(RTFAUTOOPEN) && defined(__unix__)
-#define RTFINFILE  "TEST/rtfprocess-input.rtf"
-#define RTFOUTFILE "TEST/rtfprocess-output.rtf"
-#define OPENCMD    "xdg-open TEST/rtfprocess-output.rtf"
-#else 
-#define RTFINFILE  "TEST/bigfile-input.rtf"
-#define RTFOUTFILE "TEST/bigfile-output.rtf"
-#endif
-
 int main(int argc, char **argv) {
+    FILE *fin = stdin;
+    FILE *fout = stdout;
     rtfobj *R;
-    FILE *fin;
-    FILE *fout;
-    const char *finname  = ((argc>=2) ? argv[1] : RTFINFILE);
-    const char *foutname = ((argc>=3) ? argv[2] : RTFOUTFILE);
 
-    (fin = fopen(finname, "rb"))   || DIE("Could not read file \'%s\'\n", finname);
-    (fout = fopen(foutname, "wb")) || DIE("Could not write to file \'%s\'\n", foutname);
+    char *finname = (argc > 1) ? argv[1] : NULL;
+    char *foutname = (argc > 2) ? argv[2] : NULL;
 
-    setvbuf(fin, NULL, _IOFBF,  (1<<21));
-    setvbuf(fout, NULL, _IOFBF, (1<<21));
+    if (finname)  (fin =  fopen(finname,  "rb")) || DIE("Could not read file \'%s\'\n",     finname );
+    if (foutname) (fout = fopen(foutname, "wb")) || DIE("Could not write to file \'%s\'\n", foutname);
 
     const char *replacements[] = {
         "«SSIC»",                    "1000",
@@ -45,16 +30,12 @@ int main(int argc, char **argv) {
         NULL 
     };
 
-    R = new_rtfobj(fin, fout, replacements);
+    R = new_rtfobj(fin, fout, NULL, replacements);
     rtfreplace(R);
     delete_rtfobj(R);
 
-    if (fin != stdin)   fclose(fin);
+    if (fin  != stdin)  fclose(fin);
     if (fout != stdout) fclose(fout);
-
-    #if defined(RTFAUTOOPEN)
-    system(OPENCMD);
-    #endif
 
     return 0;
 }

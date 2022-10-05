@@ -41,9 +41,10 @@ typedef struct rtfattr {
 
 // RTF OBJECT
 typedef struct rtfobj {
+    // Processing variables
     FILE         *  fin;          // RTF file-in
     FILE         *  fout;         // RTF file-out
-
+    FILE         *  ftxt;         // RTF text file-out
     size_t          ri;           // raw/txt/cmd iterators, buffer
     size_t          ti;           // sizes, and buffers
     size_t          ci;
@@ -55,21 +56,24 @@ typedef struct rtfobj {
     char            cmd[CMD_BUFFER_SIZE];
     size_t          txtrawmap[TXT_BUFFER_SIZE];
 
-    int             fatalerr;     // Cf. ERRNO. E.g., EIO, ENOMEM, etc.
-
-    int32_t         highsurrogate;
-
+    // Font table and code page
     size_t          fonttbl_n; 
     size_t          fonttbl_z;
     int32_t         fonttbl_f[FONTTBL_SIZE];
     int32_t         fonttbl_charset[FONTTBL_SIZE];
     cpg_t           documentcodepage;
 
+    // Current/temporary status variables
+    int             fatalerr;     // Cf. ERRNO. E.g., EIO, ENOMEM, etc.
+    int32_t         highsurrogate;
+
+    // Search & replace tokens (key-value pair)
     size_t          srchz;        // srch & replace pairs
     size_t          srch_match; 
     const char  **  srch_key;
     const char  **  srch_val;
     
+    // Attribute stack
     rtfattr         topattr;      // Attribute stack
     rtfattr      *  attr;         // Attribute stack
 } rtfobj;
@@ -77,7 +81,7 @@ typedef struct rtfobj {
 
 
 // FUNCTION DECLARATIONS
-rtfobj *new_rtfobj(FILE *fin, FILE *fout, const char **replacements);
+rtfobj *new_rtfobj(FILE *fin, FILE *fout, FILE *ftxt, const char **replacements);
 void    delete_rtfobj(rtfobj *R);
 void    rtfreplace(rtfobj *R);
 
