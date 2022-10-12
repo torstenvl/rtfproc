@@ -1,8 +1,6 @@
 // --------------------------------------------------------------------------
 // HIGH PRIORITY TODO
 //
-//   - In output_match(), convert non-ASCII to appropriate RTF \u and \' code
-//
 //   - Factor out pattern matching and output from top level functions; will
 //     need to support OTHER forms of processing the RTF file (e.g., finding
 //     out spans of certain characters; extracting and outputting text; etc.)
@@ -30,7 +28,6 @@
 /////////////////////////////////////////////////////////////////////////////
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <ctype.h>
 #include <errno.h>
 #include <assert.h>
@@ -77,7 +74,7 @@ static uint8_t get_hex_arg(const char *s);
 #define CHR_MATCH(x, y)      (x[0] == y && x[1] == 0)
 
 #define fgetc(x)             getc_unlocked(x)
-#define putc(x, y)           putc_unlocked(x, y)
+#define fputc(x, y)          putc_unlocked(x, y)
 #define reset_raw_buffer(R)  reset_raw_buffer_by(R, R->ri)
 #define reset_txt_buffer(R)  reset_txt_buffer_by(R, R->ti)
 #define reset_cmd_buffer(R)  reset_cmd_buffer_by(R, R->ci)
@@ -420,8 +417,22 @@ static void proc_command(rtfobj *R) {
     else if (RGX_MATCH(c,"^pict ?$"))          proc_cmd_shuntblock(R);
     else if (RGX_MATCH(c,"^colortbl ?$"))      proc_cmd_shuntblock(R);
     else if (RGX_MATCH(c,"^stylesheet ?$"))    proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^operator ?$"))      proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^title ?$"))         proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^subject ?$"))       proc_cmd_shuntblock(R);
     else if (RGX_MATCH(c,"^author ?$"))        proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^manager ?$"))       proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^company ?$"))       proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^operator ?$"))      proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^category ?$"))      proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^keywrods ?$"))      proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^comment ?$"))       proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^doccomm ?$"))       proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^hlinkbase ?$"))     proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^creatim ?$"))       proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^revtim ?$"))        proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^printim ?$"))       proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^buptim ?$"))        proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^userprops ?$"))     proc_cmd_shuntblock(R);
     else if (RGX_MATCH(c,"^bin ?$"))           proc_cmd_shuntblock(R);
     else                                       proc_cmd_unknown(R);
 
@@ -581,7 +592,7 @@ static void proc_cmd_f(rtfobj *R) {
 
 
 
-static void proc_cmd_fcharset(rtfobj *R) {
+static inline void proc_cmd_fcharset(rtfobj *R) {
     FUNC_ENTER;
     int32_t arg = get_num_arg(&R->cmd[9]);
 
@@ -593,7 +604,7 @@ static void proc_cmd_fcharset(rtfobj *R) {
 
 
 
-static void proc_cmd_cchs(rtfobj *R) {
+static inline void proc_cmd_cchs(rtfobj *R) {
     FUNC_ENTER;
     int32_t arg = get_num_arg(&R->cmd[5]);
 
@@ -603,7 +614,7 @@ static void proc_cmd_cchs(rtfobj *R) {
 
 
 
-static void proc_cmd_shuntblock(rtfobj *R) {
+static inline void proc_cmd_shuntblock(rtfobj *R) {
     FUNC_ENTER;
     R->attr->nocmd = true;
     R->attr->notxt = true;
@@ -612,7 +623,7 @@ static void proc_cmd_shuntblock(rtfobj *R) {
 
 
 
-static void proc_cmd_newpar(rtfobj *R) {
+static inline void proc_cmd_newpar(rtfobj *R) {
     FUNC_ENTER;
     add_to_txt('\n', R);
     add_to_txt('\n', R);
@@ -621,7 +632,7 @@ static void proc_cmd_newpar(rtfobj *R) {
 
 
 
-static void proc_cmd_newline(rtfobj *R) {
+static inline void proc_cmd_newline(rtfobj *R) {
     FUNC_ENTER;
     add_to_txt('\n', R);
     FUNC_VOID_RETURN;
@@ -629,7 +640,7 @@ static void proc_cmd_newline(rtfobj *R) {
 
 
 
-static void proc_cmd_unknown(rtfobj *R) {
+static inline void proc_cmd_unknown(rtfobj *R) {
     FUNC_ENTER;
     if (R->attr->blkoptional) {
         R->attr->nocmd = true;
@@ -834,22 +845,41 @@ static void reset_cmd_buffer_by(rtfobj *R, size_t amt) {
 
 static void output_match(rtfobj *R) {
     FUNC_ENTER;
-    size_t len = strlen(R->srch_val[R->srch_match]);
+    const unsigned char *output = (const unsigned char *)R->srch_val[R->srch_match];
+    int32_t cdpt;
+    uint16_t hi;
+    uint16_t lo;
+    int16_t hi_out;
+    int16_t lo_out;
+    size_t i;
 
-    // TODO: Convert non-ASCII to appropriate RTF \u and \' code
-    fwrite(R->srch_val[R->srch_match], 1, len, R->fout);
+    for (i = 0; output[i] != '\0'; ) {
+        if (output[i] < 128) {
+            fputc((int)output[i], R->fout);
+            i++;
+        } else {
+            // Value outside of ASCII range, convert to UTF-16
+            cdpt = cdpt_from_utf8(output + i);
+            utf16_from_cdpt(cdpt, &hi, &lo);
+            hi_out = (int16_t)((hi > 32767)?(hi - 65536):hi);
+            lo_out = (int16_t)((lo > 32767)?(lo - 65536):lo);
+            if (hi_out != 0) fprintf(R->fout, "{\\uc0 \\u%d}", hi_out);
+            fprintf(R->fout, "{\\uc0 \\u%d}", lo_out);
+            do { i++; } while (output[i] && output[i]>>6 == 2);
+        }
+    }
 
     // Output the same number of braces we had in our raw buffer
     // Otherwise, if the text matching our replacement key had a font change
     // something, we could end up with mismatched braces and a mildly
     // corrupted RTF file.  NB: Be careful not to do this with escaped
     // literal brace characters.
-    for (size_t i = 0UL; i < (R->ri - 1); i++) {
+    for (i = 0; i < (R->ri - 1); i++) {
         if      (R->raw[i] == '\\' && R->raw[i+1] == '\\') i++;
         else if (R->raw[i] == '\\' && R->raw[i+1] == '{')  i++;
         else if (R->raw[i] == '\\' && R->raw[i+1] == '}')  i++;
-        else if (R->raw[i] == '{') putc('{', R->fout);
-        else if (R->raw[i] == '}') putc('}', R->fout);
+        else if (R->raw[i] == '{') fputc('{', R->fout);
+        else if (R->raw[i] == '}') fputc('}', R->fout);
     }
     FUNC_VOID_RETURN;
 }
@@ -861,7 +891,7 @@ static void output_raw_by(rtfobj *R, size_t amt) {
     // Previously tried looping through the R->raw buffer and using
     // putc_unlocked() to speed up performance; however, it's actually faster
     // to use fwrite() most of the time -- not sure why.
-    // for (size_t i = 0; i < R->ri; i++) putc_unlocked(R->raw[i], R->fout);
+    // for (size_t i = 0; i < amt; i++) putc_unlocked(R->raw[i], R->fout);
     // 10 iterations with fputc() takes .22 seconds +/- .01
     // 10 iterations with fwrite() takes .18 seconds +/- .01
     // I.e., fwrite() makes the program about 20% faster.

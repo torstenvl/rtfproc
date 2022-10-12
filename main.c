@@ -10,8 +10,7 @@ int main(int argc, char **argv) {
 
     char *finname = (argc > 1) ? argv[1] : NULL;
     char *foutname = (argc > 2) ? argv[2] : NULL;
-
-    if (finname)  (fin =  fopen(finname,  "rb")) || DIE("Could not read file \'%s\'\n",     finname );
+    if (finname)  (fin  = fopen(finname,  "rb")) || DIE("Could not read file \'%s\'\n",     finname );
     if (foutname) (fout = fopen(foutname, "wb")) || DIE("Could not write to file \'%s\'\n", foutname);
 
     const char *replacements[] = {

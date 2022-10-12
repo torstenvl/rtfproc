@@ -31,14 +31,14 @@ endif
 #=============================================================================
 ifeq ($(shell cc -v 2>&1 | grep clang),"")
     CC           :=  gcc
-    OPTFLAG      :=  -DNDEBUG -Os
+    OPTFLAG      :=  -DNDEBUG -Ofast
     DBUGFLAG     :=  -pg -Ofast
     WEXCLUDE     :=  -Wno-parentheses -Wno-padded -Wno-unused-value        \
                      -Wno-unused-function
     WEVERYTHING  :=  -Wextra
 else
     CC           :=  clang
-    OPTFLAG      :=  -DNDEBUG -O3
+    OPTFLAG      :=  -DNDEBUG -Ofast
     DBUGFLAG     :=  -gfull -Ofast
     WEXCLUDE     :=  -Wno-gnu-binary-literal -Wno-c++98-compat -Wno-padded \
                      -Wno-c99-compat -Wno-poison-system-directories        \
