@@ -424,7 +424,7 @@ static void proc_command(rtfobj *R) {
     else if (RGX_MATCH(c,"^company ?$"))       proc_cmd_shuntblock(R);
     else if (RGX_MATCH(c,"^operator ?$"))      proc_cmd_shuntblock(R);
     else if (RGX_MATCH(c,"^category ?$"))      proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^keywrods ?$"))      proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^keywords ?$"))      proc_cmd_shuntblock(R);
     else if (RGX_MATCH(c,"^comment ?$"))       proc_cmd_shuntblock(R);
     else if (RGX_MATCH(c,"^doccomm ?$"))       proc_cmd_shuntblock(R);
     else if (RGX_MATCH(c,"^hlinkbase ?$"))     proc_cmd_shuntblock(R);
