@@ -1,11 +1,11 @@
 #include <stdio.h>
 #include <string.h>
-#include "rtfsed.h"
+#include "rtfproc.h"
 #include "utillib.h"
 
 int main(void) {
-    const char *finname  = "TEST/test-latepartial-input.rtf";
-    const char *foutname = "./test-latepartial-output.rtf";
+    const char *finname  = "TEST/latepartial-input.rtf";
+    const char *foutname = "TEST/latepartial-output.rtf";
     FILE *fin;
     FILE *fout;
     rtfobj *R;
@@ -21,7 +21,8 @@ int main(void) {
         NULL 
     };
 
-    R = new_rtfobj(fin, fout, NULL, replacements);
+    R = new_rtfobj(fin, fout, NULL);
+    add_rtfobj_replacements(R, replacements);
     rtfreplace(R);
     delete_rtfobj(R);
 

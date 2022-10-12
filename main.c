@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <string.h>
-#include "rtfsed.h"
+#include "rtfproc.h"
 #include "utillib.h"
 
 int main(int argc, char **argv) {
@@ -29,7 +29,8 @@ int main(int argc, char **argv) {
         NULL 
     };
 
-    R = new_rtfobj(fin, fout, NULL, replacements);
+    R = new_rtfobj(fin, fout, NULL);
+    add_rtfobj_replacements(R, replacements);
     rtfreplace(R);
     delete_rtfobj(R);
 

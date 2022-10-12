@@ -4,31 +4,6 @@
 #include <string.h>
 
 
-#define ul__IGNORE_DIAGNOSTIC(x) \
-    ul__IGNORE_DIAGNOSTIC_FOUNDATIONAL(#x) 
-
-#define ul__IGNORE_DIAGNOSTIC_FOUNDATIONAL(x) \
-    ul__SET_PRAGMA(clang diagnostic push) \
-    ul__SET_PRAGMA(clang diagnostic ignored x) \
-    ul__SET_PRAGMA(gcc diagnostic push) \
-    ul__SET_PRAGMA(gcc diagnostic ignored x)
-
-#define ul__END_IGNORE_DIAGNOSTIC \
-    ul__SET_PRAGMA(gcc diagnostic pop) \
-    ul__SET_PRAGMA(clang diagnostic pop)
-    
-#define ul__SET_PRAGMA(x) \
-    ul__SET_PRAGMA_FOUNDATIONAL(x)
-#define ul__SET_PRAGMA_FOUNDATIONAL(x) \
-    _Pragma (#x)
-
-
-
-
-
-#define INRANGE(x, y, z)  (y <= x && x <= z)
-
-
 static int32_t cdpt_from_utf16(uint16_t hi, uint16_t lo) {
     int32_t cdpt;
     bool hisurrogate = (0xD800 <= hi && hi <= 0xDBFF);
@@ -89,6 +64,7 @@ static void utf8_from_cdpt(int32_t c, char utf8[5]) {
         u[0]= '\0';
     }
 }
+
 
 int main(void) {
     uint16_t input;

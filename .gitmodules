@@ -1,9 +1,9 @@
-[submodule "STATIC/cpgtou"]
-	path = STATIC/cpgtou
+[submodule "LIB/cpgtou"]
+	path = LIB/cpgtou
 	url = https://github.com/torstenvl/cpgtou
-[submodule "STATIC/utillib"]
-	path = STATIC/utillib
+[submodule "LIB/utillib"]
+	path = LIB/utillib
 	url = https://github.com/torstenvl/utillib
-[submodule "STATIC/trex"]
-	path = STATIC/trex
+[submodule "LIB/trex"]
+	path = LIB/trex
 	url = https://github.com/torstenvl/trex

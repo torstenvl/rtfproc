@@ -9,9 +9,6 @@
 //
 //   - Sort search keys for perf reasons? 
 //
-//   - Implement file locking on construction (or just tell users to not
-//     fucking modify the file in the middle of operation)
-//
 //   - Refactor output function to output raw to fout AND output text to
 //     ftxt, assuming one or both exist. 
 //
@@ -31,7 +28,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <assert.h>
-#include "rtfsed.h"
+#include "rtfproc.h"
 #include "trex.h"
 #include "cpgtou.h"
 #include "utillib.h"
@@ -50,6 +47,7 @@ static void proc_cmd_fonttbl(rtfobj *R);
 static void proc_cmd_f(rtfobj *R);
 static void proc_cmd_fcharset(rtfobj *R);
 static void proc_cmd_cchs(rtfobj *R);
+static void proc_cmd_deff(rtfobj *R);
 static void proc_cmd_shuntblock(rtfobj *R);
 static void proc_cmd_newpar(rtfobj *R);
 static void proc_cmd_newline(rtfobj *R);
@@ -70,7 +68,7 @@ static void reset_cmd_buffer_by(rtfobj *R, size_t amt);
 static int32_t get_num_arg(const char *s);
 static uint8_t get_hex_arg(const char *s);
 
-#define RGX_MATCH(x, y)      (regexmatch((const unsigned char *) y, (const unsigned char *) x))
+#define RGX_MATCH(x, y)      (rexmatch((const unsigned char *) y, (const unsigned char *) x))
 #define CHR_MATCH(x, y)      (x[0] == y && x[1] == 0)
 
 #define fgetc(x)             getc_unlocked(x)
@@ -87,9 +85,9 @@ static uint8_t get_hex_arg(const char *s);
 ////                                                                     ////
 /////////////////////////////////////////////////////////////////////////////
 
-rtfobj *new_rtfobj(FILE *fin, FILE *fout, FILE *ftxt, const char **srch) {
+rtfobj *new_rtfobj(FILE *fin, FILE *fout, FILE *ftxt) {
     FUNC_ENTER;
-    size_t i;
+
     rtfobj *R = malloc(sizeof *R);
 
     if (!R) { LOG("Failed allocating new RTF Object."); FUNC_RETURN(NULL); }
@@ -111,26 +109,37 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, FILE *ftxt, const char **srch) {
     R->cmdz = CMD_BUFFER_SIZE;
 
     R->fonttbl_z = FONTTBL_SIZE;
-
-    // Set up replacement dictionary
-    for (i=0; srch[i] != NULL; i++);
-    R->srchz = i/2;
-    R->srch_match = 0UL;
-    R->srch_key = malloc(R->srchz * sizeof *R->srch_key);
-    R->srch_val = malloc(R->srchz * sizeof *R->srch_val);
-    if ((!R->srch_key) || (!R->srch_val)) {
-        delete_rtfobj(R);
-        LOG("Out of memory allocating search key/value pointers!");
-        FUNC_RETURN(NULL);
-    }
-    for (i=0; i < R->srchz; i++) {
-        R->srch_key[i] = srch[2*i];
-        R->srch_val[i] = srch[2*i+1];
-    }
+    R->defaultfont = -1;
 
     R->attr = &R->topattr;
 
     FUNC_RETURN(R);
+}
+
+
+
+void add_rtfobj_replacements(rtfobj *R, const char **replacements) {
+    FUNC_ENTER;
+    size_t i;
+
+    for (i=0; replacements[i] != NULL; i++);
+
+    R->srchz = i/2;
+    R->srch_match = 0UL;
+    R->srch_key = malloc(R->srchz * sizeof *R->srch_key);
+    R->srch_val = malloc(R->srchz * sizeof *R->srch_val);
+
+    if ((!R->srch_key) || (!R->srch_val)) {
+        LOG("Out of memory allocating search key/value pointers!");
+        R->fatalerr = ENOMEM;
+        FUNC_VOID_RETURN;
+    }
+
+    for (i=0; i < R->srchz; i++) {
+        R->srch_key[i] = replacements[2*i];
+        R->srch_val[i] = replacements[2*i+1];
+    }
+    FUNC_VOID_RETURN;
 }
 
 
@@ -241,6 +250,8 @@ static void dispatch_text(int c, rtfobj *R) {
         case '\n':
             break;
         case '\t':
+            add_to_txt(0x09, R);
+            break;
         case '\v':
             add_to_txt(' ', R);
             break;
@@ -400,41 +411,42 @@ static void proc_command(rtfobj *R) {
     char *c = &R->cmd[1];
 
     if (0);
-    else if (CHR_MATCH(c,'{'))                 proc_cmd_escapedliteral(R);
-    else if (CHR_MATCH(c,'}'))                 proc_cmd_escapedliteral(R);
-    else if (CHR_MATCH(c,'\\'))                proc_cmd_escapedliteral(R);
-    else if (CHR_MATCH(c,'\r'))                proc_cmd_newline(R);
-    else if (CHR_MATCH(c,'\n'))                proc_cmd_newline(R);
-    else if (RGX_MATCH(c,"^\'\\x\\x"))         proc_cmd_apostrophe(R);
-    else if (RGX_MATCH(c,"^u-?\\d+ ?$"))       proc_cmd_u(R);
-    else if (RGX_MATCH(c,"^uc\\d+ ?$"))        proc_cmd_uc(R);
-    else if (RGX_MATCH(c,"^f\\d+ ?$"))         proc_cmd_f(R);
-    else if (RGX_MATCH(c,"^fcharset\\d+ ?$"))  proc_cmd_fcharset(R);
-    else if (RGX_MATCH(c,"^cchs\\d+ ?$"))      proc_cmd_cchs(R);
-    else if (RGX_MATCH(c,"^fonttbl ?$"))       proc_cmd_fonttbl(R);
-    else if (RGX_MATCH(c,"^par ?$"))           proc_cmd_newpar(R);
-    else if (RGX_MATCH(c,"^line ?$"))          proc_cmd_newline(R);
-    else if (RGX_MATCH(c,"^pict ?$"))          proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^colortbl ?$"))      proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^stylesheet ?$"))    proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^title ?$"))         proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^subject ?$"))       proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^author ?$"))        proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^manager ?$"))       proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^company ?$"))       proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^operator ?$"))      proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^category ?$"))      proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^keywrods ?$"))      proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^comment ?$"))       proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^doccomm ?$"))       proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^hlinkbase ?$"))     proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^creatim ?$"))       proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^revtim ?$"))        proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^printim ?$"))       proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^buptim ?$"))        proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^userprops ?$"))     proc_cmd_shuntblock(R);
-    else if (RGX_MATCH(c,"^bin ?$"))           proc_cmd_shuntblock(R);
-    else                                       proc_cmd_unknown(R);
+    else if (CHR_MATCH(c,'{'))                   proc_cmd_escapedliteral(R);
+    else if (CHR_MATCH(c,'}'))                   proc_cmd_escapedliteral(R);
+    else if (CHR_MATCH(c,'\\'))                  proc_cmd_escapedliteral(R);
+    else if (CHR_MATCH(c,'\r'))                  proc_cmd_newline(R);
+    else if (CHR_MATCH(c,'\n'))                  proc_cmd_newline(R);
+    else if (RGX_MATCH(c,"^\'\\x\\x"))           proc_cmd_apostrophe(R);
+    else if (RGX_MATCH(c,"^u-?\\d+\\s?$"))       proc_cmd_u(R);
+    else if (RGX_MATCH(c,"^uc\\d+\\s?$"))        proc_cmd_uc(R);
+    else if (RGX_MATCH(c,"^f\\d+\\s?$"))         proc_cmd_f(R);
+    else if (RGX_MATCH(c,"^fcharset\\d+\\s?$"))  proc_cmd_fcharset(R);
+    else if (RGX_MATCH(c,"^cchs\\d+\\s?$"))      proc_cmd_cchs(R);
+    else if (RGX_MATCH(c,"^deff\\d+\\s?$"))      proc_cmd_deff(R);
+    else if (RGX_MATCH(c,"^fonttbl\\s?$"))       proc_cmd_fonttbl(R);
+    else if (RGX_MATCH(c,"^par\\s?$"))           proc_cmd_newpar(R);
+    else if (RGX_MATCH(c,"^line\\s?$"))          proc_cmd_newline(R);
+    else if (RGX_MATCH(c,"^pict\\s?$"))          proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^colortbl\\s?$"))      proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^stylesheet\\s?$"))    proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^title\\s?$"))         proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^subject\\s?$"))       proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^author\\s?$"))        proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^manager\\s?$"))       proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^company\\s?$"))       proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^operator\\s?$"))      proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^category\\s?$"))      proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^keywords\\s?$"))      proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^comment\\s?$"))       proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^doccomm\\s?$"))       proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^hlinkbase\\s?$"))     proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^creatim\\s?$"))       proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^revtim\\s?$"))        proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^printim\\s?$"))       proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^buptim\\s?$"))        proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^userprops\\s?$"))     proc_cmd_shuntblock(R);
+    else if (RGX_MATCH(c,"^bin\\s?$"))           proc_cmd_shuntblock(R);
+    else                                         proc_cmd_unknown(R);
 
     // If the command is \* then the entire block is optional, but...
     // if we then recognize the command, revoke any 'optional' status.
@@ -507,10 +519,12 @@ static void proc_cmd_apostrophe(rtfobj *R) {
     uint8_t arg;
     const int32_t *mult = 0;
 
+    cpg_t cpg = (R->attr->codepage)?(R->attr->codepage):(R->documentcodepage);
+
     if (R->attr->uc0i) { R->attr->uc0i--; FUNC_VOID_RETURN; }
 
     arg = get_hex_arg(R->cmd);
-    cdpt = cpgtou(R->attr->codepage, arg, &R->attr->xtra, &mult);
+    cdpt = cpgtou(cpg, arg, &R->attr->xtra, &mult);
 
     // If we are starting a double-byte sequence, then we need to tell the
     // add_to_txt function that we're adding text (so it can do text setup,
@@ -530,10 +544,10 @@ static void proc_cmd_apostrophe(rtfobj *R) {
     // If there's no match or the code page is unsupported, don't do anything
     // except emit a diagnostic message (if and only if we're in debug mode).
     else if (cdpt == cpNONE) {
-        DBUG("cpNONE: Code point %d does not exist code page %d", arg, R->attr->codepage);
+        DBUG("cpNONE: Code point %d does not exist code page %d", arg, cpg);
     }
     else if (cdpt == cpUNSP) {
-        DBUG("cpUNSP: Code page %d is unsupported", R->attr->codepage);
+        DBUG("cpUNSP: Code page %d is unsupported", cpg);
     }
 
     // Lastly, in the general case, convert the code point to UTF-8 and add
@@ -562,11 +576,11 @@ static void proc_cmd_f(rtfobj *R) {
     size_t i;
     int32_t arg = get_num_arg(&R->cmd[2]);
 
-    // If defining a fonttbl, look for an existing font entry for f
-    // If it can't be found, create it (assuming there's space)
     if (R->attr->fonttbl) {
+        // If defining a fonttbl, look for an existing font entry for f
         for (i = 0; i < R->fonttbl_n; i++)  if (R->fonttbl_f[i] == arg) break;
 
+        // If we're at the end (i.e., not found), then add it
         if (i == R->fonttbl_n) {
             if (R->fonttbl_n + 1 < R->fonttbl_z) {
                 R->fonttbl_n++;
@@ -576,6 +590,11 @@ static void proc_cmd_f(rtfobj *R) {
             } else {
                 FUNC_VOID_DIE("Out of fonttbl space, not defining f%d\n", arg);
             }
+        }
+
+        // Otherwise, we're redefining one; set the definition index
+        else {
+            R->attr->fonttbl_defn_idx  = (int32_t)i;
         }
     }
 
@@ -596,8 +615,16 @@ static inline void proc_cmd_fcharset(rtfobj *R) {
     FUNC_ENTER;
     int32_t arg = get_num_arg(&R->cmd[9]);
 
+    // If we're defining a font table and have a valid definition index...
     if (R->attr->fonttbl && R->attr->fonttbl_defn_idx >= 0) {
+        // Add the appropriate character set to the font table
         R->fonttbl_charset[R->attr->fonttbl_defn_idx] = arg;
+        // Also, if we're dealing with the default font...
+        if (R->fonttbl_f[R->attr->fonttbl_defn_idx] == R->defaultfont) {
+            // Set that font's character set as the document code page.
+            R->documentcodepage = cpgfromcharsetnum(arg);
+        }
+
     }
     FUNC_VOID_RETURN;
 }
@@ -612,6 +639,16 @@ static inline void proc_cmd_cchs(rtfobj *R) {
     FUNC_VOID_RETURN;
 }
 
+
+
+static inline void proc_cmd_deff(rtfobj *R) {
+    FUNC_ENTER;
+    int32_t arg = get_num_arg(&R->cmd[5]);
+
+    R->defaultfont = arg;
+
+    FUNC_VOID_RETURN;
+}
 
 
 static inline void proc_cmd_shuntblock(rtfobj *R) {
@@ -810,9 +847,9 @@ static void reset_raw_buffer_by(rtfobj *R, size_t amt) {
 static void reset_txt_buffer_by(rtfobj *R, size_t amt) {
     FUNC_ENTER;
     size_t remaining = R->ti - amt;
-    // if (R->ftxt) {
-    //     fwrite(R->txt, 1, amt, R->ftxt);
-    // }
+    if (R->ftxt) {
+        fwrite(R->txt, 1, amt, R->ftxt);
+    }
     memmove(R->txt, &R->txt[amt], remaining);
     R->ti = remaining;
     memzero(&R->txt[remaining], amt);
@@ -852,6 +889,8 @@ static void output_match(rtfobj *R) {
     int16_t hi_out;
     int16_t lo_out;
     size_t i;
+
+    if (!R->fout) FUNC_VOID_RETURN;
 
     for (i = 0; output[i] != '\0'; ) {
         if (output[i] < 128) {
@@ -895,6 +934,7 @@ static void output_raw_by(rtfobj *R, size_t amt) {
     // 10 iterations with fputc() takes .22 seconds +/- .01
     // 10 iterations with fwrite() takes .18 seconds +/- .01
     // I.e., fwrite() makes the program about 20% faster.
+    if (!R->fout) FUNC_VOID_RETURN;
     fwrite(R->raw, 1, amt, R->fout);
     FUNC_VOID_RETURN;
 }

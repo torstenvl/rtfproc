@@ -5,7 +5,7 @@
 
 #include <stdio.h>
 #include <stdbool.h>
-#include "STATIC/cpgtou/cpgtou.h"
+#include "cpgtou.h"
 
 
 
@@ -61,6 +61,7 @@ typedef struct rtfobj {
     size_t          fonttbl_z;
     int32_t         fonttbl_f[FONTTBL_SIZE];
     int32_t         fonttbl_charset[FONTTBL_SIZE];
+    int32_t         defaultfont;
     cpg_t           documentcodepage;
 
     // Current/temporary status variables
@@ -81,7 +82,8 @@ typedef struct rtfobj {
 
 
 // FUNCTION DECLARATIONS
-rtfobj *new_rtfobj(FILE *fin, FILE *fout, FILE *ftxt, const char **replacements);
+rtfobj *new_rtfobj(FILE *fin, FILE *fout, FILE *ftxt);
+void    add_rtfobj_replacements(rtfobj *R, const char **replacements);
 void    delete_rtfobj(rtfobj *R);
 void    rtfreplace(rtfobj *R);
 
