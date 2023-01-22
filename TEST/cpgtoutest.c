@@ -1,8 +1,6 @@
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
-// including the source file is necessary
-// to conduct unit tests on static functions
 #include "cpgtou.h"
 #include "utillib.h"
 

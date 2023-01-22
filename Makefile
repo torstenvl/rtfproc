@@ -1,153 +1,106 @@
-#=============================================================================
-#                               PROJECT SETTINGS
-#=============================================================================
-EXEC    :=  $(shell basename `pwd`)
-LIBDIR  :=  $(wildcard STATIC/*)
-LIBSRC  :=  $(wildcard STATIC/*/*.c)
-LIBHDR  :=  $(wildcard STATIC/*/*.h)
+#–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+#                                CONFIGURATION
+#–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+override \
+CFLAGS     +=  -funsigned-char \
+               -W -Wall -Wextra -Werror \
+               -Wno-unknown-warning -Wno-unknown-warning-option -Wno-padded \
+               -Wno-parentheses -Wno-c99-compat -Wno-unused-function \
+               -Isrc -Itemplib \
+			   -DBUILDSTAMP=$(shell date +"%Y%m%d.%H%M%S")
 
-#=============================================================================
-#                          OS-SPECIFIC CONFIGURATION
-#=============================================================================
-ifeq ($(shell uname -s),Linux)
-    TIME         :=  /usr/bin/time --format "\t%e real\t%U user\t%S sys"
-    OPEN         :=  xdg-open
-else ifeq ($(shell uname -s),FreeBSD)
-    TIME         :=  /usr/bin/time
-    OPEN         :=  xdg-open
-else ifeq ($(shell uname -s),Darwin)
-    TIME         :=  /usr/bin/time
-    OPEN         :=  open
-endif
-
-#=============================================================================
-#                       COMPILER-SPECIFIC CONFIGURATION
-#=============================================================================
-ifeq ($(shell clang -v 2>&1 | grep clang),"")
-    CC           :=  gcc
-    OPTFLAG      :=  -Ofast
-    DBUGFLAG     :=  -pg -Ofast
-    WEXCLUDE     :=  -Wno-parentheses -Wno-unused-value -Wno-padded          \
-                     -Wno-unused-function
+ifdef STACKDEBUG
+override CFLAGS += -O1 -ggdb3 -DulNEEDTRACE
+else ifdef DEBUG
+override CFLAGS += -O1 -ggdb3
 else
-    CC           :=  clang
-    OPTFLAG      :=  -Ofast
-    DBUGFLAG     :=  -gfull -Ofast
-    WEXCLUDE     :=  -Wno-poison-system-directories -Wno-padded              \
-                     -Wno-c99-compat
+override CFLAGS += -Ofast -DNDEBUG
 endif
 
-
-#=============================================================================
-#                                 BUILD FLAGS
-#=============================================================================
-CFLAGS   :=  -funsigned-char -Wno-gnu-label-as-value $(subst STATIC,-I./STATIC,$(LIBDIR))
-RELEASE  :=  $(CFLAGS) $(OPTFLAG) -DNDEBUG
-DEBUG    :=  $(CFLAGS) $(DBUGFLAG)
-STACKDBG :=  $(DEBUG)  -DUL__NEED_STACKTRACE
-STRICT1  :=  -W -Wall $(WEXCLUDE)
-STRICT2  :=  $(STRICT1) -pedantic                                            \
-             -Wstrict-prototypes -Wmissing-prototypes -Wchar-subscripts      \
-             -Wpointer-arith -Wcast-qual -Wswitch -Wshadow -Wcast-align      \
-             -Wreturn-type -Wwrite-strings -Winline -Wredundant-decls        \
-             -Wmisleading-indentation -Wunused-parameter -Wnested-externs
-STRICT3  :=  $(STRICT2) -Weverything -Werror 
+FORCEPREP  :=  $(shell mkdir -p templib && find . -iregex ".*src/.*\.[ch].*" -exec cp -a {} templib/ \;)
+VPATH       =  templib
 
 
-#=============================================================================
-#                                BUILD TARGETS
-#=============================================================================
-.PHONY:     release debug stackdebug demo strict stricter strictest clean test
-all:        release
-release:    main.c $(LIBSRC) $(LIBHDR)
-	@$(CC)  main.c $(LIBSRC) $(RELEASE)                 -o main
-debug:      main.c $(LIBSRC) $(LIBHDR)
-	@$(CC)  main.c $(LIBSRC) $(DEBUG)                   -o main
-stackdebug: main.c $(LIBSRC) $(LIBHDR)
-	@$(CC)  main.c $(LIBSRC) $(STACKDBG)                -o main
-strict:     main.c $(LIBSRC) $(LIBHDR)
-	@$(CC)  main.c $(LIBSRC) $(RELEASE) $(STRICT1)      -o main
-stricter:   main.c $(LIBSRC) $(LIBHDR)
-	@$(CC)  main.c $(LIBSRC) $(RELEASE) $(STRICT2)      -o main
-strictest:  main.c $(LIBSRC) $(LIBHDR)
-	@$(CC)  main.c $(LIBSRC) $(RELEASE) $(STRICT3)      -o main
-demo:       release
-	@./$(EXEC) TEST/test-letter-input.rtf test-letter-output.rtf
-	@$(OPEN) rtfprocess-output.rtf
+
+#–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+#                                   TARGETS
+#–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+.PHONY:			clean test DT
+all:			test
+
+%.o : %.c
+	@$(CC) $(CFLAGS) -c $<
+
 clean:
-	@rm -Rf .DS_Store core *.o *~ *.dSYM/ */*.dSYM Info.plist */Info.plist
-	@rm -Rf main testexec
-	@echo Repository cleaned
+	@rm -fr   .DS_Store    Thumbs.db    core    *.dSYM    *.o
+	@rm -fr */.DS_Store  */Thumbs.db  */core  */*.dSYM  */*.o
+	-@$(foreach dir,$(shell find modules -type d -depth 1 2>/dev/null),$(MAKE) clean -C $(dir) 2>/dev/null;)
+	@rm -fr $(TESTEXE) templib
 
 
-#=============================================================================
+
+#–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 #                                 TEST HARNESS
-#=============================================================================
-SUCCESS    :=  "\342\234\205 OK\n"
-FAILURE    :=  "\342\235\214\033[1;31m FAILED!!!\033[m\n"
-TESTCC     :=  $(CC) $(RELEASE) $(STRICT3) $(LIBSRC)
-TESTTGT    :=  ./testexec
-TESTDIR    :=  $(wildcard TEST)
-TESTEND    :=  printf $(SUCCESS) || printf $(FAILURE)
-TESTSTART   =  printf "%s %-36s" "Testing" $(subst test_,,$@...)
-
-test: testsuiteprologue testsuite testsuiteepilogue
-testsuiteprologue:
-	@printf "\nRUNNING TEST SUITE\n——————————————————\n"
-testsuiteepilogue:
-	@printf "\n\n"
-	@rm $(TESTTGT)
+#–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+TESTEXE     =   ./testprog
+TESTSTART   =   printf "%s %-36s" "Testing" $(subst test_,,$@...)
+TESTEND     =   printf "\342\234\205 OK\n" || printf "\342\235\214\033[1;31m FAILED!!!\033[m\n"
+TESTCC      =   $(CC) $(CFLAGS) -o $(TESTEXE)
+test: 			testbegin testsuite testfinish
+testbegin:	;	@printf "RUNNING TEST SUITE\n——————————————————\n"
+testfinish:	;	@rm -fr $(TESTEXE) templib temp.rtf
 
 
-#=============================================================================
-#                                    TESTS
-#=============================================================================
-testsuite: test_utf8test test_cpgtoutest test_rtfprocess test_latepartialmatches test_speedtest
 
-test_utf8test:   $(LIBSRC) $(LIBHDR) TEST/utf8test.c 
+#–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+#                                SPECIFIC TESTS
+#–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+testsuite: test_utf8test      \
+           test_cpgtoutest    \
+		   test_letter        \
+		   test_latepartial   \
+		   test_speedtest
+
+test_utf8test:		test/utf8test.c
 	@$(TESTSTART)
-	@$(TESTCC) TEST/utf8test.c -o $(TESTTGT)
-	@$(TESTTGT) && $(TESTEND)
+	@$(TESTCC)		test/utf8test.c
+	@$(TESTEXE) && $(TESTEND)
 
-test_cpgtoutest: $(LIBSRC) $(LIBHDR) TEST/cpgtoutest.c 
+test_cpgtoutest:	cpgtou.o test/cpgtoutest.c
 	@$(TESTSTART)
-	@$(TESTCC) TEST/cpgtoutest.c -o $(TESTTGT)
-	@$(TESTTGT) && $(TESTEND)
+	@$(TESTCC)		cpgtou.o test/cpgtoutest.c
+	@$(TESTEXE) && $(TESTEND)
 
-test_rtfprocess: $(LIBSRC) $(LIBHDR) main.c 
+test_letter:		rtfproc.o cpgtou.o trex.o test/letter.c
 	@$(TESTSTART)
-	@$(TESTCC) main.c -o $(TESTTGT)
-	@$(TESTTGT) TEST/letter-input.rtf TEST/letter-output.rtf
-	@diff TEST/letter-output.rtf TEST/letter-correct.rtf > /dev/null && \
-	      rm TEST/letter-output.rtf && \
-		  $(TESTEND)
+	@$(TESTCC)		rtfproc.o cpgtou.o trex.o test/letter.c
+	@$(TESTEXE) test/letter-input.rtf temp.rtf && \
+	 diff temp.rtf test/letter-correct.rtf && \
+	 $(TESTEND)
 	
-test_latepartialmatches: $(LIBSRC) $(LIBHDR) TEST/latepartial.c
+test_latepartial:	rtfproc.o cpgtou.o trex.o test/latepartial.c
 	@$(TESTSTART)
-	@$(TESTCC) TEST/latepartial.c -o $(TESTTGT)
-	@$(TESTTGT)
-	@diff TEST/latepartial-output.rtf TEST/latepartial-correct.rtf > /dev/null && \
-	      rm TEST/latepartial-output.rtf && \
-		  $(TESTEND)
+	@$(TESTCC)		rtfproc.o cpgtou.o trex.o test/latepartial.c
+	@$(TESTEXE) && \
+	 diff temp.rtf test/latepartial-correct.rtf && \
+	 $(TESTEND)
 
-test_speedtest: $(LIBSRC) $(LIBHDR) main.c 
+test_speedtest:		rtfproc.o cpgtou.o trex.o test/letter.c
 	@$(TESTSTART)
+	@$(TESTCC)		rtfproc.o cpgtou.o trex.o test/letter.c
+	@strip $(TESTEXE)
 	@echo
-	@$(CC) $(RELEASE) $(STRICT3) $(LIBSRC) main.c -o $(TESTTGT)
-	@strip $(TESTTGT)
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@$(TIME) $(TESTTGT) TEST/bigfile-input.rtf temp.rtf
-	@diff TEST/bigfile-input.rtf temp.rtf && rm temp.rtf || echo "FILES DON'T MATCH!" 
-
-
+	@time $(TESTEXE) TEST/bigfile-input.rtf temp.rtf
+	@time $(TESTEXE) TEST/bigfile-input.rtf temp.rtf
+	@time $(TESTEXE) TEST/bigfile-input.rtf temp.rtf
+	@time $(TESTEXE) TEST/bigfile-input.rtf temp.rtf
+	@time $(TESTEXE) TEST/bigfile-input.rtf temp.rtf
+	@time $(TESTEXE) TEST/bigfile-input.rtf temp.rtf
+	@time $(TESTEXE) TEST/bigfile-input.rtf temp.rtf
+	@time $(TESTEXE) TEST/bigfile-input.rtf temp.rtf
+	@time $(TESTEXE) TEST/bigfile-input.rtf temp.rtf
+	@time $(TESTEXE) TEST/bigfile-input.rtf temp.rtf
+	@diff TEST/bigfile-input.rtf temp.rtf
 
 # perfrun:    main.c $(LIBSRC) $(LIBHDR)
 # 	@$(CC)  main.c $(LIBSRC) $(CFLAGS) $(OPTFLAG)       -o perfrun

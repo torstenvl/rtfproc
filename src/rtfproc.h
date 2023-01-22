@@ -1,7 +1,9 @@
-#ifndef RTFSED_H__
-#define RTFSED_H__
+#ifndef RTFPROC_H__
+#define RTFPROC_H__
 
-
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stdio.h>
 #include <stdbool.h>
@@ -18,12 +20,15 @@
 #define   PARTIAL               0
 #define   MATCH                 1
 
+#define   RTF_PROC_START       -1
+#define   RTF_PROC_STEP         0
+#define   RTF_PROC_END          1
 
 
 // ATTRIBUTE STACK ENTRY
 typedef struct rtfattr {
-    size_t          uc;
-    size_t          uc0i;        // Iterator from uc to 0 after \u cmd
+    size_t          uc;          // # bytes of text to skip after \u cmd
+    size_t          uccountdown; // Iterate from uc to 0 after \u cmd
 
     bool            fonttbl;     // Currently defining a font table
     bool            blkoptional; // Block is optional due to \*
@@ -71,8 +76,8 @@ typedef struct rtfobj {
     // Search & replace tokens (key-value pair)
     size_t          srchz;        // srch & replace pairs
     size_t          srch_match; 
-    const char  **  srch_key;
-    const char  **  srch_val;
+    char        **  srch_key;
+    char        **  srch_val;
     
     // Attribute stack
     rtfattr         topattr;      // Attribute stack
@@ -83,10 +88,19 @@ typedef struct rtfobj {
 
 // FUNCTION DECLARATIONS
 rtfobj *new_rtfobj(FILE *fin, FILE *fout, FILE *ftxt);
-void    add_rtfobj_replacements(rtfobj *R, const char **replacements);
+size_t  add_rtfobj_replacements(rtfobj *R, const char **replacements);
+size_t  add_one_rtfobj_replacement(rtfobj *R, const char *key, const char *val);
 void    delete_rtfobj(rtfobj *R);
 void    rtfreplace(rtfobj *R);
+void    rtfprocess(rtfobj *R, void (*processfunction)(rtfobj *, void *, int), void *data);
+
+void    reset_raw_buffer_by(rtfobj *R, size_t amt);
+void    reset_txt_buffer_by(rtfobj *R, size_t amt);
+void    reset_cmd_buffer_by(rtfobj *R, size_t amt);
 
 
+#ifdef __cplusplus
+}
+#endif
 
 #endif

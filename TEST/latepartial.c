@@ -5,7 +5,7 @@
 
 int main(void) {
     const char *finname  = "TEST/latepartial-input.rtf";
-    const char *foutname = "TEST/latepartial-output.rtf";
+    const char *foutname = "temp.rtf";
     FILE *fin;
     FILE *fout;
     rtfobj *R;

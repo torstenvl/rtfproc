@@ -1,9 +1,9 @@
-[submodule "LIB/cpgtou"]
-	path = LIB/cpgtou
-	url = https://github.com/torstenvl/cpgtou
-[submodule "LIB/utillib"]
-	path = LIB/utillib
-	url = https://github.com/torstenvl/utillib
-[submodule "LIB/trex"]
-	path = LIB/trex
+[submodule "modules/trex"]
+	path = modules/trex
 	url = https://github.com/torstenvl/trex
+[submodule "modules/cpgtou"]
+	path = modules/cpgtou
+	url = https://github.com/torstenvl/cpgtou
+[submodule "modules/utillib"]
+	path = modules/utillib
+	url = https://github.com/torstenvl/utillib
