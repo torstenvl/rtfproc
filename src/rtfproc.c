@@ -1,16 +1,24 @@
-// --------------------------------------------------------------------------
+// ==========================================================================
 //
-// LOW PRIORITY TODO
+// RTFPROC – RTF Processing Library
+// Copyright (c) 2019-2023, Joshua Lee Ockert
 //
-//   - Sort search keys for perf reasons?
+// THIS WORK IS PROVIDED "AS IS" WITH NO WARRANTY OF ANY KIND. THE IMPLIED
+// WARRANTIES OF MERCHANTABILITY, FITNESS, NON-INFRINGEMENT, AND TITLE ARE
+// EXPRESSLY DISCLAIMED. NO AUTHOR SHALL BE LIABLE UNDER ANY THEORY OF LAW
+// FOR ANY DAMAGES OF ANY KIND RESULTING FROM THE USE OF THIS WORK.
 //
+// Permission to use, copy, modify, and/or distribute this work for any
+// purpose is hereby granted, provided this notice appears in all copies.
+//
+// ==========================================================================
+
+
+// TODO
 //   - Refactor output function to output raw to fout AND output text to
 //     ftxt, assuming one or both exist.
-//
 //   - Normalize replacement tokens as well as any Unicode in the text before
 //     comparison.  Use NFC normalization.
-//
-// --------------------------------------------------------------------------
 
 
 /////////////////////////////////////////////////////////////////////////////
