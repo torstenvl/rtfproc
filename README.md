@@ -75,4 +75,5 @@ EXPRESSLY DISCLAIMED. NO AUTHOR SHALL BE LIABLE UNDER ANY THEORY OF LAW
 FOR ANY DAMAGES OF ANY KIND RESULTING FROM THE USE OF THIS WORK.
 
 Permission to use, copy, modify, and/or distribute this work for any
-purpose is hereby granted, provided this notice appears in all copies. 
+purpose is hereby granted, provided this notice appears in all copies.
+
