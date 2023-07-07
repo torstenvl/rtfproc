@@ -43,6 +43,7 @@ static void dispatch_command(rtfobj *R);
 static void read_command(rtfobj *R);
 static void proc_command(rtfobj *R);
 static void proc_cmd_escapedliteral(rtfobj *R);
+static void proc_cmd_specialstandin(rtfobj *R);
 static void proc_cmd_uc(rtfobj *R);
 static void proc_cmd_u(rtfobj *R);
 static void proc_cmd_apostrophe(rtfobj *R);
@@ -488,6 +489,9 @@ static void read_command(rtfobj *R) {
         case '{':  // Escaped literal
         case '}':  // Escaped literal
         case '\\': // Escaped literal
+        case '~':  // Special one-character stand-in
+        case '_':  // Special one-character stand-in
+        case '-':  // Special one-character stand-in
         case '*':  // Special one-character command
         case '\n': // Line Feed --> newline
             add_to_cmd(c, R);
@@ -553,6 +557,9 @@ static void proc_command(rtfobj *R) {
     else if (CHR_MATCH(c,'{'))                   proc_cmd_escapedliteral(R);
     else if (CHR_MATCH(c,'}'))                   proc_cmd_escapedliteral(R);
     else if (CHR_MATCH(c,'\\'))                  proc_cmd_escapedliteral(R);
+    else if (CHR_MATCH(c,'~'))                   proc_cmd_specialstandin(R);
+    else if (CHR_MATCH(c,'_'))                   proc_cmd_specialstandin(R);
+    else if (CHR_MATCH(c,'-'))                   proc_cmd_specialstandin(R);
     else if (CHR_MATCH(c,'\r'))                  proc_cmd_newline(R);
     else if (CHR_MATCH(c,'\n'))                  proc_cmd_newline(R);
     else if (RGX_MATCH(c,"^\'\\x\\x"))           proc_cmd_apostrophe(R);
@@ -601,6 +608,22 @@ static inline void proc_cmd_escapedliteral(rtfobj *R) {
     BEGIN_FUNCTION
 
     add_to_txt(R->cmd[1], R);
+
+    RETURN();
+}
+
+
+
+static inline void proc_cmd_specialstandin(rtfobj *R) {
+    BEGIN_FUNCTION
+
+    int32_t cdpt = 0;
+
+    if (R->cmd[1] == '~') cdpt = 0x00A0; // Non-breaking space
+    if (R->cmd[1] == '_') cdpt = 0x2011; // Non-breaking hyphen
+    if (R->cmd[1] == '-') cdpt = 0x00AD; // Soft hyphen
+
+    if (cdpt) add_string_to_txt((const char*)utf8_from_cdpt(cdpt), R);
 
     RETURN();
 }
