@@ -423,12 +423,24 @@ static int pattern_match(rtfobj *R) {
         for (curkey = 0; curkey < R->srchz; curkey++) {
 
             // Inline early-fail strcmp. Library function is slow on macOS.
-            // i = first non-matching character (or index of \0 for both)
-            for (i = 0; R->txt[offset+i] == R->srch_key[curkey][i] && R->txt[offset+i] != '\0'; i++);
+            // KEY: i = index of '\0' OR first non-matching character
+            for (i = 0;
+                 R->txt[offset+i] == R->srch_key[curkey][i] &&
+                 R->txt[offset+i] != '\0';
+                 i++);
 
-            if (R->txt[offset+i] == R->srch_key[curkey][i]) { // Therefore both '\0'
-                // We reached the end of BOTH strings without finding a mis-match, so...
-                // the entirety of both strings at this offset must match.
+            // We can tell if there's a match by whether i is the index of a
+            // mismatch or the end of the string.  If it's the end of the
+            // string, then there is a complete match, and we need to output
+            // the appropriate replacement.
+            // The fastest/easiest way to determine that is whether the index
+            // is equal between the two strings.  If it is, then a mismatch is
+            // not what caused the above loop to break; it must have been the
+            // null terminator.
+            if (R->txt[offset+i] == R->srch_key[curkey][i]) {
+                // But if we're at an offeset within the text buffer, we need
+                // to output the raw data corresponding to the text buffer
+                // before the offset.
                 if (offset > 0) {
                     output_raw_by(R, R->txtrawmap[ offset ]);
                     reset_raw_buffer_by(R, R->txtrawmap[ offset ]);
@@ -444,6 +456,9 @@ static int pattern_match(rtfobj *R) {
                 // Reached the end of the text buffer (the data we've read in so
                 // far) without finding a mismatch, but haven't reached the end
                 // of the replacement key. That means it's a partial match.
+                // TODO: Continue checking to see if we have a complete match
+                // later in the replacement list. Alternatively, we could sort
+                // the replacement list by shortest to longest key.
                 if (offset > 0) {
                     output_raw_by(R, R->txtrawmap[ offset ]);
                     reset_raw_buffer_by(R, R->txtrawmap[ offset ]);
