@@ -93,7 +93,8 @@ static uint8_t get_hex_arg(const char *s);
 rtfobj *new_rtfobj(FILE *fin, FILE *fout, FILE *ftxt) {
     rtfobj *R;
 
-    BEGIN_FUNCTION
+    if (!fin) return NULL;
+    if (!fout && !ftxt) return NULL;
 
     R = malloc(sizeof *R);
 
@@ -128,7 +129,7 @@ rtfobj *new_rtfobj(FILE *fin, FILE *fout, FILE *ftxt) {
 
     R->attr = &R->topattr;
 
-    RETURN(R);
+    return R;
 }
 
 
@@ -138,8 +139,8 @@ size_t add_rtfobj_replacements(rtfobj *R, const char **replacements) {
     size_t newitems;
     char  **newkey;
     char  **newval;
-
-    BEGIN_FUNCTION
+    char   *tmpkey;
+    char   *tmpval;
 
     // Find out how many new elements there are
     for (newitems=0; replacements[newitems] != NULL; newitems++);
@@ -163,17 +164,21 @@ size_t add_rtfobj_replacements(rtfobj *R, const char **replacements) {
 
     // Add the new elements to the arrays
     for (i = 0; i < newitems; i++) {
-        // TODO: Check returns and make sure its safe
-        R->srch_key[R->srchz + i] = strdup(replacements[2*i]);
-        R->srch_val[R->srchz + i] = strdup(replacements[2*i+1]);
-        // R->srch_key[R->srchz + i] = replacements[2*i];
-        // R->srch_val[R->srchz + i] = replacements[2*i+1];
+        tmpkey = strdup(replacements[2*i]);
+        tmpval = strdup(replacements[2*i+1]);
+        if (tmpkey && tmpval) {
+            R->srch_key[R->srchz + i] = tmpkey;
+            R->srch_val[R->srchz + i] = tmpval;
+        } else {
+            i--;
+            break;
+        }
     }
 
     // Set the new size of the arrays
-    R->srchz += newitems;
+    R->srchz += i;
 
-    RETURN(newitems);
+    return i;
 }
 
 
@@ -183,8 +188,6 @@ size_t add_one_rtfobj_replacement(rtfobj *R, const char *key, const char *val) {
     char   *tmpkey = NULL;
     char   *tmpval = NULL;
     size_t  i;
-
-    BEGIN_FUNCTION
 
     if (!key) RETURN(0UL);
     if (!val) RETURN(0UL);
@@ -248,9 +251,6 @@ size_t add_one_rtfobj_replacement(rtfobj *R, const char *key, const char *val) {
 
 
 void delete_rtfobj(rtfobj *R) {
-
-    BEGIN_FUNCTION
-
     if (R) {
         for (size_t i=0; i < R->srchz; i++) {
             free(R->srch_key[i]);
@@ -261,8 +261,6 @@ void delete_rtfobj(rtfobj *R) {
         while (R->attr->outer) pop_attr(R);
     }
     free(R);
-
-    RETURN();
 }
 
 
@@ -280,8 +278,6 @@ void delete_rtfobj(rtfobj *R) {
 
 void rtfreplace(rtfobj *R) {
     int c;
-
-    BEGIN_FUNCTION
 
     while ((c = fgetc(R->fin)) != EOF) {
 
@@ -301,15 +297,11 @@ void rtfreplace(rtfobj *R) {
     }
 
     output_raw(R);
-
-    RETURN();
 }
 
 
 void rtfprocess(rtfobj *R, void (*processfunction)(rtfobj *, void *, int), void *passthru) {
     int c;
-
-    BEGIN_FUNCTION
 
     processfunction(R, passthru, RTF_PROC_START);
     while ((c = fgetc(R->fin)) != EOF) {
@@ -327,8 +319,6 @@ void rtfprocess(rtfobj *R, void (*processfunction)(rtfobj *, void *, int), void 
         }
     }
     processfunction(R, passthru, RTF_PROC_END);
-
-    RETURN();
 }
 
 
@@ -339,19 +329,14 @@ void rtfprocess(rtfobj *R, void (*processfunction)(rtfobj *, void *, int), void 
 /////////////////////////////////////////////////////////////////////////////
 
 static void dispatch_scope(int c, rtfobj *R) {
-    BEGIN_FUNCTION
-
     add_to_raw(c, R);
     if      (c == '{')  push_attr(R);
     else if (c == '}')  pop_attr(R);
-
-    RETURN();
 }
 
 
 
 static void dispatch_command(rtfobj *R) {
-    BEGIN_FUNCTION
 
     read_command(R);
 
@@ -364,21 +349,29 @@ static void dispatch_command(rtfobj *R) {
     // can, e.g., flush the existing raw buffer the first time text is added,
     // knowing that we won't be flushing the raw RTF code that *corresponds*
     // to the text we just added.
+    // Put another way, we intentionally do "late" copying from the raw input
+    // to the raw buffer because there's an inherent lag between the raw input
+    // and the text buffer (e.g., Unicode code points, special escapes, etc.),
+    // and we want to keep the text buffer and raw buffer sync'd. 
     add_cmdstring_to_raw(R->cmd, R);
 
-    RETURN();
 }
 
 
 
 static void dispatch_text(int c, rtfobj *R) {
-    BEGIN_FUNCTION
 
     if (R->attr->notxt) { add_to_raw(c, R); RETURN(); }
 
-    // Ignore newlines and carriage returns in RTF code. Consider tabs and
-    // vertical tabs to be interchangeable with spaces. Treat everything else
-    // literally.
+    // RTF 1.9 Spec:  "A carriage return (character value 13) or line feed
+    // (character value 10) is treated as a \par control if the character is
+    // preceded by a backslash[] otherwise, RTF ignores the [character]. . . . 
+    // A tab (character value 9) should be treated as a \tab control word." 
+    // The RTF Spec does not address the \v (vertical tab) character, so
+    // that's fun.  Microsoft Word treats a 0x0B in the raw RTF as an 
+    // underscore, but Microsoft WordPad treats it as a newline, as does
+    // macOS TextEdit.  LibreOffice ignores it altogether!  We'll treat it as
+    // a space for now, but I'm very open to revisiting this.
     switch(c) {
         case '\r':
         case '\n':
@@ -388,13 +381,14 @@ static void dispatch_text(int c, rtfobj *R) {
             break;
         case '\v':
             add_to_txt(' ', R);
+            // Should we change this to proc_cmd_newline(R) ???
             break;
         default:
             add_to_txt(c, R);
     }
+
     add_to_raw(c, R);
 
-    RETURN();
 }
 
 
@@ -414,8 +408,6 @@ static int pattern_match(rtfobj *R) {
     size_t offset;
     size_t curkey;
     size_t i;
-
-    BEGIN_FUNCTION
 
     if (R->ti < 1 || R->attr->notxt) RETURN(PARTIAL);
 
@@ -473,7 +465,7 @@ static int pattern_match(rtfobj *R) {
     reset_raw_buffer(R);
     reset_txt_buffer(R);
 
-    RETURN(NOMATCH);
+    return NOMATCH;
 }
 
 
@@ -491,8 +483,6 @@ static int pattern_match(rtfobj *R) {
 
 static void read_command(rtfobj *R) {
     int c;
-
-    BEGIN_FUNCTION
 
     reset_cmd_buffer(R);
 
@@ -555,8 +545,6 @@ static void read_command(rtfobj *R) {
 
             break;
     }
-
-    RETURN();
 }
 
 
@@ -620,18 +608,12 @@ static void proc_command(rtfobj *R) {
 
 
 static inline void proc_cmd_escapedliteral(rtfobj *R) {
-    BEGIN_FUNCTION
-
     add_to_txt(R->cmd[1], R);
-
-    RETURN();
 }
 
 
 
 static inline void proc_cmd_specialstandin(rtfobj *R) {
-    BEGIN_FUNCTION
-
     int32_t cdpt = 0;
 
     if (R->cmd[1] == '~') cdpt = 0x00A0; // Non-breaking space
@@ -639,26 +621,18 @@ static inline void proc_cmd_specialstandin(rtfobj *R) {
     if (R->cmd[1] == '-') cdpt = 0x00AD; // Soft hyphen
 
     if (cdpt) add_string_to_txt((const char*)utf8_from_cdpt(cdpt), R);
-
-    RETURN();
 }
 
 
 
 static inline void proc_cmd_uc(rtfobj *R) {
-    BEGIN_FUNCTION
-
     R->attr->uc = (size_t)get_num_arg(&R->cmd[1]);
-
-    RETURN();
 }
 
 
 
 static void proc_cmd_u(rtfobj *R) {
     int32_t arg;
-
-    BEGIN_FUNCTION
 
     arg = get_num_arg(&R->cmd[2]);
 
@@ -693,7 +667,6 @@ static void proc_cmd_u(rtfobj *R) {
 
     R->attr->uccountdown = R->attr->uc;
 
-    RETURN();
 }
 
 
@@ -702,8 +675,6 @@ static void proc_cmd_apostrophe(rtfobj *R) {
     int32_t cdpt;
     uint8_t arg;
     const int32_t *mult = NULL;
-
-    BEGIN_FUNCTION
 
     cpg_t cpg = (R->attr->codepage)?(R->attr->codepage):(R->documentcodepage);
 
@@ -742,19 +713,16 @@ static void proc_cmd_apostrophe(rtfobj *R) {
         add_string_to_txt((const char*)utf8_from_cdpt(cdpt), R);
     }
 
-    RETURN();
 }
 
 
 
 static inline void proc_cmd_fonttbl(rtfobj *R) {
-    BEGIN_FUNCTION
 
     R->attr->notxt = true;
     R->attr->fonttbl = true;
     R->attr->fonttbl_defn_idx = -1;
 
-    RETURN();
 }
 
 
@@ -762,8 +730,6 @@ static inline void proc_cmd_fonttbl(rtfobj *R) {
 static void proc_cmd_f(rtfobj *R) {
     size_t i;
     int32_t arg;
-
-    BEGIN_FUNCTION
 
     arg = get_num_arg(&R->cmd[2]);
 
@@ -797,15 +763,12 @@ static void proc_cmd_f(rtfobj *R) {
         }
     }
 
-    RETURN();
 }
 
 
 
 static inline void proc_cmd_fcharset(rtfobj *R) {
     int32_t arg;
-
-    BEGIN_FUNCTION
 
     arg = get_num_arg(&R->cmd[9]);
 
@@ -821,7 +784,6 @@ static inline void proc_cmd_fcharset(rtfobj *R) {
 
     }
 
-    RETURN();
 }
 
 
@@ -829,12 +791,8 @@ static inline void proc_cmd_fcharset(rtfobj *R) {
 static inline void proc_cmd_cchs(rtfobj *R) {
     int32_t arg;
 
-    BEGIN_FUNCTION
-
     arg = get_num_arg(&R->cmd[5]);
     R->attr->codepage = cpgfromcharsetnum(arg);
-
-    RETURN();
 }
 
 
@@ -842,56 +800,36 @@ static inline void proc_cmd_cchs(rtfobj *R) {
 static inline void proc_cmd_deff(rtfobj *R) {
     int32_t arg;
 
-    BEGIN_FUNCTION
-
     arg = get_num_arg(&R->cmd[5]);
     R->defaultfont = arg;
-
-    RETURN();
 }
 
 
 static inline void proc_cmd_shuntblock(rtfobj *R) {
-    BEGIN_FUNCTION
-
     R->attr->nocmd = true;
     R->attr->notxt = true;
-
-    RETURN();
 }
 
 
 
 static inline void proc_cmd_newpar(rtfobj *R) {
-    BEGIN_FUNCTION
-
     add_to_txt('\n', R);
     add_to_txt('\n', R);
-
-    RETURN();
 }
 
 
 
 static inline void proc_cmd_newline(rtfobj *R) {
-    BEGIN_FUNCTION
-
     add_to_txt('\n', R);
-
-    RETURN();
 }
 
 
 
 static inline void proc_cmd_unknown(rtfobj *R) {
-    BEGIN_FUNCTION
-
     if (R->attr->blkoptional) {
         R->attr->nocmd = true;
         R->attr->notxt = true;
     }
-
-    RETURN();
 }
 
 
@@ -906,8 +844,6 @@ static inline void proc_cmd_unknown(rtfobj *R) {
 /////////////////////////////////////////////////////////////////////////////
 
 static void add_to_raw(int c, rtfobj *R) {
-    BEGIN_FUNCTION
-
     if (R->ri + 1 >= RAW_BUFFER_SIZE) {
         if (R->ti > 0) {
             DBUG("Exhausted raw buffer.");
@@ -933,8 +869,6 @@ static void add_to_raw(int c, rtfobj *R) {
     }
 
     R->raw[R->ri++] = (char)c;
-
-    RETURN();
 }
 
 
@@ -952,8 +886,6 @@ static void add_to_txt(int c, rtfobj *R) {
     // make assumptions based on the fact that the text buffer is empty, i.e.,
     // shouldn't run text setup again.
     _Thread_local static int deferred = 0;
-
-    BEGIN_FUNCTION
 
     // If we have to skip byte due to a \uc directive, then decrement
     // the number of bytes to skip and return.
@@ -986,26 +918,18 @@ static void add_to_txt(int c, rtfobj *R) {
 
     R->txt[ R->ti++ ] = (char)c;
     deferred = 0;
-
-    RETURN();
 }
 
 
 
 static void add_to_cmd(int c, rtfobj *R) {
-    BEGIN_FUNCTION
-
     assert(R->ci + 1 < R->cmdz);
     R->cmd[R->ci++] = (char)c;
-
-    RETURN();
 }
 
 
 
 static void add_string_to_txt(const char *s, rtfobj *R) {
-    BEGIN_FUNCTION
-
     if (R->ti+strlen(s) >= R->txtz) {
         ////////////////////////////////////////////////////////////////////
         ////  RECOVERY CODE IS A HACK, NEED TO DO BETTER
@@ -1020,14 +944,11 @@ static void add_string_to_txt(const char *s, rtfobj *R) {
     }
 
     while (*s) add_to_txt((int)(*s++), R);
-
-    RETURN();
 }
 
 
 
 static void add_cmdstring_to_raw(const char *s, rtfobj *R) {
-    BEGIN_FUNCTION
 
     if (R->ri+strlen(s) >= R->rawz) {
         DBUG("Exhausted raw buffer.");
@@ -1049,7 +970,6 @@ static void add_cmdstring_to_raw(const char *s, rtfobj *R) {
 
     while (*s) R->raw[R->ri++] = *s++;
 
-    RETURN();
 }
 
 
@@ -1057,22 +977,17 @@ static void add_cmdstring_to_raw(const char *s, rtfobj *R) {
 void reset_raw_buffer_by(rtfobj *R, size_t amt) {
     size_t remaining;
 
-    BEGIN_FUNCTION
-
     remaining = R->ri - amt;
     memmove(R->raw, &R->raw[amt], remaining);
     R->ri = remaining;
     memzero(&R->raw[remaining], amt);
 
-    RETURN();
 }
 
 
 
 void reset_txt_buffer_by(rtfobj *R, size_t amt) {
     size_t remaining;
-
-    BEGIN_FUNCTION
 
     if (R->ftxt) fwrite(R->txt, 1, amt, R->ftxt);
 
@@ -1081,7 +996,6 @@ void reset_txt_buffer_by(rtfobj *R, size_t amt) {
     R->ti = remaining;
     memzero(&R->txt[remaining], amt);
 
-    RETURN();
 }
 
 
@@ -1089,14 +1003,11 @@ void reset_txt_buffer_by(rtfobj *R, size_t amt) {
 void reset_cmd_buffer_by(rtfobj *R, size_t amt) {
     size_t remaining;
 
-    BEGIN_FUNCTION
-
     remaining = R->ci - amt;
     memmove(R->cmd, &R->cmd[amt], remaining);
     R->ci = remaining;
     memzero(&R->cmd[remaining], amt);
 
-    RETURN();
 }
 
 
